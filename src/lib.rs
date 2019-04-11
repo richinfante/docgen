@@ -4,7 +4,7 @@ extern crate mozjs;
 
 use std::collections::HashMap;
 use serde_json::Value;
-
+use regex::{Regex, Captures};
 
 use std::default::Default;
 use std::io::{self, Write};
@@ -49,25 +49,216 @@ use std::ptr;
 unsafe fn stringify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> String {
   if rval.is_number() {
     return format!("{}", rval.to_number())
+  } else if rval.is_int32() {
+    return format!("{}", rval.to_int32())
+  } else if rval.is_double() {
+    return format!("{}", rval.to_double())
   } else if rval.is_string() {
     return mozjs::conversions::jsstr_to_string(cx, rval.to_string())
   } else if rval.is_undefined() {
     return "undefined".into()
   } else if rval.is_null() {
     return "null".into()
+  } else if rval.is_boolean() {
+    if rval.to_boolean() {
+      return "true".into()
+    } else {
+      return "false".into()
+    }
   }
 
   unimplemented!()
 }
 
-pub fn eval_in_engine(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, contents: String) -> String {
+unsafe fn boolify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> bool {
+  if rval.is_number() {
+    return rval.to_number() != 0.0
+  } else if rval.is_int32() {
+    return rval.to_int32() != 0
+  } else if rval.is_double() {
+    return rval.to_double() != 0.0
+  } else if rval.is_string() {
+    return mozjs::conversions::jsstr_to_string(cx, rval.to_string()).len() > 0
+  } else if rval.is_undefined() {
+    return false
+  } else if rval.is_null() {
+    return false
+  } else if rval.is_boolean() {
+    return rval.to_boolean()
+  } else if rval.is_object() {
+    return true
+  } else if rval.is_symbol() {
+    return true
+  }
+
+  unimplemented!()
+}
+
+pub fn eval_in_engine(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, contents: &str) -> String {
   unsafe {
     rooted!(in(cx) let mut rval = UndefinedValue());
-
-    rt.evaluate_script(global.handle(), &contents, "test", 1, rval.handle_mut());
+    rt.evaluate_script(global.handle(), contents, "test", 1, rval.handle_mut());
     return stringify_jsvalue(cx, &rval)
-        
   }
+}
+
+pub fn eval_in_engine_bool(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, contents: &str) -> bool {
+  unsafe {
+    rooted!(in(cx) let mut rval = UndefinedValue());
+    rt.evaluate_script(global.handle(), contents, "test", 1, rval.handle_mut());
+    return boolify_jsvalue(cx, &rval)
+  }
+}
+
+
+pub struct CondGenFlags {
+  remove: bool,
+  replace: Option<Vec<Rc<Node>>>
+}
+
+impl CondGenFlags {
+  pub fn default() -> CondGenFlags {
+    CondGenFlags {
+      remove: false,
+      replace: None
+    }
+  }
+}
+
+
+pub fn inner_text(node: &Rc<Node>) -> String {
+  match node.data.borrow() {
+    NodeData::Text { contents } => {
+      let mut tendril = contents.borrow();
+      format!("{}", tendril)
+    },
+    _ => {
+      let mut children = node.children.borrow();
+
+      let mut string = String::new();
+
+      for item in children.iter() {
+        string.push_str(&inner_text(item));
+      }
+
+      string
+    }
+  }
+}
+
+pub fn get_attribute(node: &Rc<Node>, key: &str) -> Option<String> {
+  match node.data.borrow() {
+    NodeData::Element { attrs, .. } =>{
+      let attributes : Ref<Vec<html5ever::interface::Attribute>> = attrs.borrow();
+
+      for attr in attributes.iter() {
+        println!("{:?}", attr);
+        let name = &attr.name.local.to_string();
+
+        if name == key {
+          return Some(String::from(&attr.value))
+        }
+      }
+
+      return None
+    },
+    _ => None
+  }
+}
+
+pub fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, node: &mut Rc<Node>) -> CondGenFlags {
+    match node.data.borrow() {
+      NodeData::Element { name, attrs, .. } => {
+          println!("element name: {:?}", name);
+
+          if name.local.to_string() == "script" {
+            if get_attribute(&node, "ssr") == Some("true".to_string()) {
+              let script = inner_text(node);
+              eval_in_engine(&global, &rt, cx, &script);
+            }
+          }
+
+          let mut attributes : RefMut<Vec<html5ever::interface::Attribute>> = attrs.borrow_mut();
+
+          for attr in attributes.iter_mut() {
+            println!("{:?}", attr);
+            let name = &attr.name.local.to_string();
+            let script = String::from(&attr.value);
+            if name.starts_with(":") {
+              attr.name = QualName::new(None, "".into(), name[1..].to_string().into());
+              attr.value = eval_in_engine(&global, &rt, cx, &script).into();
+            } else if name == "x-if" {
+              let included = eval_in_engine_bool(&global, &rt, cx, &script);
+              if !included {
+                return CondGenFlags {
+                  remove: true,
+                  replace: None
+                }
+              }
+            }
+          }
+
+          // attributes.push(html5ever::interface::Attribute {
+          //   name: QualName::new(None, "".into(), "x-generated-ssr".into()),
+          //   value: "true".into()
+          // });
+
+          let mut children = node.children.borrow_mut();
+
+          for item in children.iter_mut() {
+            render_children(global, rt, cx, item);
+          }
+          
+          return CondGenFlags::default()
+      },
+      NodeData::Comment { .. } => {
+        println!("is comment");
+
+        return CondGenFlags::default()
+      },
+      NodeData::Text { contents } => {
+        let mut tendril = contents.borrow_mut();
+        // let contents : String = tendril.into();
+        let x = format!("{}", tendril);
+
+        // println!("Text Node: {}", x);
+
+        let regex = Regex::new(r###"\{\{(.*?)\}\}"###).unwrap();
+
+        let result = regex.replace_all(&x, |caps: &Captures| {
+          if let Some(code) = caps.get(0) {
+            let string : &str = code.into();
+            return eval_in_engine(&global, rt, cx, string)
+          }
+
+          return "".to_string();
+        });
+
+        tendril.clear();
+        tendril.try_push_bytes(result.as_bytes()).unwrap();
+        return CondGenFlags::default()
+      },
+      NodeData::Doctype { .. } => {
+        println!("is doctype");
+        return CondGenFlags::default()
+      },
+      NodeData::ProcessingInstruction { .. } => {
+        println!("is processing instruction");
+        return CondGenFlags::default();
+      },
+      NodeData::Document { .. } => {
+        println!("is document!");
+
+        let mut children = node.children.borrow_mut();
+
+        for item in children.iter_mut() {
+          render_children(global, rt, cx, item);
+        }
+
+        return CondGenFlags::default();
+
+      }
+    }
 }
 
 pub fn render(template: &mut String, variables: Value) -> String {
@@ -98,63 +289,11 @@ pub fn render(template: &mut String, variables: Value) -> String {
 
       {
         let document : &Node = dom.document.borrow();
-        let docchildren: Ref<Vec<Rc<Node>>> = document.children.borrow();
-        println!("docchildren len: {}", docchildren.len());
-        let html : &Node = docchildren[1].borrow();
-        let htmlchildren: Ref<Vec<Rc<Node>>> = html.children.borrow();
-        println!("htmlchildren len: {}", htmlchildren.len());
-        let body : &Node = htmlchildren.borrow()[2].borrow(); // Implicit head element at children[0].
-        let mut bodychildren : RefMut<Vec<Rc<Node>>> = body.children.borrow_mut();
-        {
-            for a in bodychildren.iter_mut() {
-
-              match a.data.borrow() {
-                NodeData::Element { name, attrs, .. } => {
-                    println!("element name: {:?}", name);
-                    let mut attributes : RefMut<Vec<html5ever::interface::Attribute>> = attrs.borrow_mut();
-
-                    for attr in attributes.iter_mut() {
-                      println!("{:?}", attr);
-                      let name = &attr.name.local;
-                      if name.to_ascii_lowercase().starts_with(":") {
-                        attr.name = QualName::new(None, "".into(), name.to_ascii_lowercase()[1..].to_string().into());
-                        let string = String::from(&attr.value);
-
-                        attr.value = eval_in_engine(&global, &rt, cx, string).into();
-                      }
-                    }
-
-                    attributes.push(html5ever::interface::Attribute {
-                      name: QualName::new(None, "".into(), "x-generated-ssr".into()),
-                      value: "true".into()
-                    })
-                },
-                NodeData::Comment { .. } => {
-                  println!("is comment")
-                },
-                NodeData::Text { contents } => {
-                  let tendril = contents.borrow_mut();
-                  // let contents = String::from(tendril);
-
-                },
-                NodeData::Doctype { .. } => {
-                  println!("is doctype")
-                },
-                NodeData::ProcessingInstruction { .. } => {
-                  println!("is processing instruction")
-                },
-                NodeData::Document { .. } => {
-                  println!("is document!")
-                },
-                _ => {
-                  println!("is other")
-                }
-              }
-            }
+        let mut docchildren: RefMut<Vec<Rc<Node>>> = document.children.borrow_mut();
+        for a in docchildren.iter_mut() {
+          render_children(&global, &rt, cx, a);
         }
       }
-    
-    
 
     // The validator.nu HTML2HTML always prints a doctype at the very beginning.
     // io::stdout()
