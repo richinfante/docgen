@@ -31,7 +31,7 @@ use mozjs::rust::{JSEngine, Runtime, SIMPLE_GLOBAL_CLASS};
 use mozjs::jsval::JSVal;
 use mozjs::jsapi::JSContext;
 use mozjs::jsapi::JSObject;
-
+use mozjs::jsapi::{JS, self};
 use std::ptr;
 // pub fn render_node_and_children(node: &mut Rc<Node>) {
 //   if let NodeData::Text { contents } = &node.data {
@@ -94,11 +94,29 @@ unsafe fn boolify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> bool {
   unimplemented!()
 }
 
+pub fn get_iterator(cx: *mut JSContext, object: *mut JSObject, name: &str) -> JSVal {
+  unsafe {
+    rooted!(in(cx) let mut rval = UndefinedValue());
+    rooted!(in(cx) let mut y = object);
+    jsapi::JS_GetProperty(cx, y.handle(), name.as_bytes(), rval.handle_mut());
+    rval.clone()
+  }
+}
+
 pub fn eval_in_engine(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, contents: &str) -> String {
   unsafe {
     rooted!(in(cx) let mut rval = UndefinedValue());
     rt.evaluate_script(global.handle(), contents, "test", 1, rval.handle_mut());
     return stringify_jsvalue(cx, &rval)
+  }
+}
+
+pub fn eval(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, contents: &str) -> Result<JSVal, ()> {
+  unsafe {
+    rooted!(in(cx) let mut rval = UndefinedValue());
+    rt.evaluate_script(global.handle(), contents, "test", 1, rval.handle_mut());
+
+    return Ok(rval.clone());
   }
 }
 
@@ -125,7 +143,8 @@ impl CondGenFlags {
   }
 }
 
-
+/// Get the inner text of a node.
+/// This allows us to do things like <script> elements, etc.
 pub fn inner_text(node: &Rc<Node>) -> String {
   match node.data.borrow() {
     NodeData::Text { contents } => {
@@ -146,13 +165,15 @@ pub fn inner_text(node: &Rc<Node>) -> String {
   }
 }
 
+/// Get an attribute's value, if it exists.
+/// Convert to a rust string for easy comparisons.
 pub fn get_attribute(node: &Rc<Node>, key: &str) -> Option<String> {
   match node.data.borrow() {
     NodeData::Element { attrs, .. } =>{
       let attributes : Ref<Vec<html5ever::interface::Attribute>> = attrs.borrow();
 
       for attr in attributes.iter() {
-        println!("{:?}", attr);
+
         let name = &attr.name.local.to_string();
 
         if name == key {
@@ -167,9 +188,21 @@ pub fn get_attribute(node: &Rc<Node>, key: &str) -> Option<String> {
 }
 
 pub fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, node: &mut Rc<Node>) -> CondGenFlags {
+    let mut flags = CondGenFlags::default();
+
     match node.data.borrow() {
+      NodeData::Document { .. } => {
+        let mut children = node.children.borrow_mut();
+
+        for item in children.iter_mut() {
+          render_children(global, rt, cx, item);
+        }
+
+        return CondGenFlags::default();
+
+      },
       NodeData::Element { name, attrs, .. } => {
-          println!("element name: {:?}", name);
+          // println!("element name: {:?}", name);
 
           if name.local.to_string() == "script" {
             if get_attribute(&node, "ssr") == Some("true".to_string()) {
@@ -181,7 +214,7 @@ pub fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::
           let mut attributes : RefMut<Vec<html5ever::interface::Attribute>> = attrs.borrow_mut();
 
           for attr in attributes.iter_mut() {
-            println!("{:?}", attr);
+            // println!("{:?}", attr);
             let name = &attr.name.local.to_string();
             let script = String::from(&attr.value);
             if name.starts_with(":") {
@@ -195,6 +228,15 @@ pub fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::
                   replace: None
                 }
               }
+            } else if name == "x-each" {
+              let replacements : Vec<Rc<Node>> = vec![];
+              let iter = eval(&global, &rt, cx, &script).unwrap();
+
+              use mozjs::jsapi::JS;
+              return CondGenFlags {
+                remove:true,
+                replace: Some(replacements)
+              }
             }
           }
 
@@ -202,19 +244,29 @@ pub fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::
           //   name: QualName::new(None, "".into(), "x-generated-ssr".into()),
           //   value: "true".into()
           // });
+          let mut out_children : Vec<Rc<Node>> = vec![];
 
-          let mut children = node.children.borrow_mut();
+          {
+            let mut children = node.children.borrow_mut();
 
-          for item in children.iter_mut() {
-            render_children(global, rt, cx, item);
+            for item in children.iter_mut() {
+              let flags = render_children(global, rt, cx, item);
+
+              if !flags.remove {
+                out_children.push(item.clone())
+              }
+
+              if let Some(replacements) = flags.replace {
+                for item in replacements {
+                  out_children.push(item);
+                }
+              }
+            }
           }
-          
-          return CondGenFlags::default()
-      },
-      NodeData::Comment { .. } => {
-        println!("is comment");
 
-        return CondGenFlags::default()
+          node.children.replace(out_children);
+
+          return CondGenFlags::default();
       },
       NodeData::Text { contents } => {
         let mut tendril = contents.borrow_mut();
@@ -238,25 +290,14 @@ pub fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::
         tendril.try_push_bytes(result.as_bytes()).unwrap();
         return CondGenFlags::default()
       },
+      NodeData::Comment { .. } => {
+        return CondGenFlags::default()
+      },
       NodeData::Doctype { .. } => {
-        println!("is doctype");
         return CondGenFlags::default()
       },
       NodeData::ProcessingInstruction { .. } => {
-        println!("is processing instruction");
         return CondGenFlags::default();
-      },
-      NodeData::Document { .. } => {
-        println!("is document!");
-
-        let mut children = node.children.borrow_mut();
-
-        for item in children.iter_mut() {
-          render_children(global, rt, cx, item);
-        }
-
-        return CondGenFlags::default();
-
       }
     }
 }
@@ -272,7 +313,12 @@ pub fn render(template: &mut String, variables: Value) -> String {
                               &CompartmentOptions::default())
       );
 
-    
+      // TODO: this is bad code.
+      eval(&global, &rt, cx, &format!(r###"
+      docgen = {{
+        version: "{}"
+      }};
+"###, env!("CARGO_PKG_VERSION")));
 
     let opts = ParseOpts {
           tree_builder: TreeBuilderOpts {
