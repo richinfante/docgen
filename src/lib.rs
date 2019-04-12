@@ -2,12 +2,9 @@
 #[macro_use]
 extern crate mozjs;
 
-use std::collections::HashMap;
 use serde_json::Value;
-use regex::{Regex, Captures};
 
-use std::default::Default;
-use std::io::{self, Write};
+use regex::{Regex, Captures};
 
 use html5ever::driver::ParseOpts;
 use html5ever::rcdom::RcDom;
@@ -16,12 +13,7 @@ use html5ever::tendril::StrTendril;
 use html5ever::tree_builder::TreeBuilderOpts;
 use html5ever::{parse_document, serialize};
 use html5ever::rcdom::{Node, NodeData};
-use std::rc::Rc;
-use std::cell::RefCell;
-use std::borrow::{BorrowMut, Borrow};
-use std::cell::{Ref, RefMut};
 use html5ever::interface::QualName;
-
 
 use mozjs::jsapi::CompartmentOptions;
 use mozjs::jsapi::JS_NewGlobalObject;
@@ -32,21 +24,18 @@ use mozjs::jsval::JSVal;
 use mozjs::jsapi::JSContext;
 use mozjs::jsapi::JSObject;
 use mozjs::jsapi::{JS, self};
+
+use std::collections::HashMap;
+use std::default::Default;
+use std::io::{self, Write};
+use std::rc::Rc;
+use std::cell::RefCell;
+use std::borrow::{BorrowMut, Borrow};
+use std::cell::{Ref, RefMut};
 use std::ffi::{CStr, CString};
 use std::ptr;
-// pub fn render_node_and_children(node: &mut Rc<Node>) {
-//   if let NodeData::Text { contents } = &node.data {
-//     println!("Got text node: {:?}", contents);
-//   }
 
-//   let mut arr = node.children.borrow_mut();
-//   for child in arr.iter_mut() {
-//     let mut c = child;
-//     c.data = NodeData::Text { contents: RefCell::new(StrTendril::from("FOO")) }; 
-//     // render_node_and_children(&mut child);
-//   }
-// }
-
+/// Stringify a jsval into a rust string for injection into the template
 unsafe fn stringify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> String {
   if rval.is_number() {
     return format!("{}", rval.to_number())
@@ -71,6 +60,7 @@ unsafe fn stringify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> String {
   unimplemented!()
 }
 
+/// Boolean check for a jsval.
 unsafe fn boolify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> bool {
   if rval.is_number() {
     return rval.to_number() != 0.0
@@ -95,44 +85,10 @@ unsafe fn boolify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> bool {
   unimplemented!()
 }
 
-// pub fn get_symbol(cx: *mut JSContext, global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,) -> JSVal {
-//   unsafe {
-//     let c_str = std::ffi::CString::new("Symbol").unwrap();
-//     let ptr = c_str.as_ptr() as *const i8;
-
-//     rooted!(in(cx) let mut rval = UndefinedValue());
-//     if !jsapi::JS_GetProperty(cx, global.handle(), ptr, handle) {
-      
-//     }
-
-//     unimplemented!()
-//   }
-// }
-
-/// Returns the property with the given `name`, if it is a callable object,
-/// or an error otherwise.
-// pub fn get_callable_property(cx: *mut JSContext, object: *mut JSObject, name: &str) {
-//     rooted!(in(cx) let mut callable = UndefinedValue());
-//     rooted!(in(cx) let obj = object);
-//     unsafe {
-//         let c_name = CString::new(name).unwrap();
-//         if !jsapi::JS_GetProperty(cx, obj.handle(), c_name.as_ptr(), callable.get().handle_mut()) {
-          
-//         }
-
-//         // if !callable.is_object() || !IsCallable(callable.to_object()) {
-//         //     return Err(Error::Type(format!(
-//         //         "The value of the {} property is not callable",
-//         //         name
-//         //     )));
-//         // }
-//     }
-// }
-
 pub fn eval_in_engine(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, contents: &str) -> String {
   unsafe {
     rooted!(in(cx) let mut rval = UndefinedValue());
-    rt.evaluate_script(global.handle(), contents, "test", 1, rval.handle_mut());
+    rt.evaluate_script(global.handle(), contents, "docgen", 1, rval.handle_mut());
     return stringify_jsvalue(cx, &rval)
   }
 }
@@ -140,7 +96,7 @@ pub fn eval_in_engine(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::J
 pub fn eval(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, contents: &str) -> Result<JSVal, ()> {
   unsafe {
     rooted!(in(cx) let mut rval = UndefinedValue());
-    rt.evaluate_script(global.handle(), contents, "test", 1, rval.handle_mut());
+    rt.evaluate_script(global.handle(), contents, "docgen", 1, rval.handle_mut());
 
     return Ok(rval.clone());
   }
@@ -149,18 +105,19 @@ pub fn eval(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, 
 pub fn eval_in_engine_bool(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, contents: &str) -> bool {
   unsafe {
     rooted!(in(cx) let mut rval = UndefinedValue());
-    rt.evaluate_script(global.handle(), contents, "test", 1, rval.handle_mut());
+    rt.evaluate_script(global.handle(), contents, "docgen", 1, rval.handle_mut());
     return boolify_jsvalue(cx, &rval)
   }
 }
 
-
+/// Flags used for conditional node generation
 pub struct CondGenFlags {
   remove: bool,
   replace: Option<Vec<Rc<Node>>>
 }
 
 impl CondGenFlags {
+  /// Set up the default flags
   pub fn default() -> CondGenFlags {
     CondGenFlags {
       remove: false,
@@ -213,6 +170,7 @@ pub fn get_attribute(node: &Rc<Node>, key: &str) -> Option<String> {
   }
 }
 
+/// Render the children of a node, recursively.
 unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, node: &mut Rc<Node>) -> CondGenFlags {
     let mut flags = CondGenFlags::default();
 
@@ -255,69 +213,52 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
                 }
               }
             } else if name == "x-each" {
+              // 0. Run the script and setup replacement list.
               let object = eval(&global, &rt, cx, &script).unwrap();
-
               let replacements : Vec<Rc<Node>> = vec![];
 
               // 1. Symbol.Iterator
               let mut sym = mozjs::jsapi::GetWellKnownSymbol(cx, jsapi::SymbolCode::iterator);
               let id = mozjs::glue::RUST_SYMBOL_TO_JSID(sym);
 
-              // 3. object[Symbol.iterator]
+              // 2. object[Symbol.iterator]
               rooted!(in(cx) let mut fnhandle = UndefinedValue());
               rooted!(in(cx) let obj = object.to_object());
               if !mozjs::rust::wrappers::JS_GetPropertyById(cx, obj.handle(), mozjs::rust::Handle::new(&id), fnhandle.handle_mut()) {
                   panic!("Couldnt get iterator")
               }
 
-              println!("{} {} {}", fnhandle.is_undefined(), fnhandle.is_null(), fnhandle.is_object());
-
-              // // rooted!(in(cx) let args = mozjs::jsapi::AutoValueVector);
-
-              let empty_args : mozjs::jsapi::HandleValueArray = mozjs::jsapi::HandleValueArray::new();
-              let rp = &empty_args as *const mozjs::jsapi::HandleValueArray;
-
-              println!("{:?} {:?}", empty_args, rp);
-
-              // let pt = x.as_ptr() as *const mozjs::jsapi::HandleValueArray;
-
+              // 3. Call function to get an iterator.
               rooted!(in(cx) let mut iterret = UndefinedValue());
               rooted!(in(cx) let func = mozjs::rust::wrappers::JS_ValueToFunction(cx, fnhandle.handle()));
-
-              // let c_str = std::ffi::CString::new("fn1").unwrap();
-              // let ptr = c_str.as_ptr() as *const i8;
-
-              // println!("generated fn");
-
-              
-              // mozjs::rust::jsapi_wrapped::JS_CallFunctionName(cx, global.handle(), ptr, &empty_args, &mut iterret.handle_mut());
-          
               let args = mozjs::jsapi::HandleValueArray::new();
               mozjs::rust::wrappers::JS_CallFunction(cx, obj.handle(), func.handle(), &args, iterret.handle_mut());
               
               
+              // 4. Call the iterator.next() function
               rooted!(in(cx) let mut returnvalue = UndefinedValue());
               rooted!(in(cx) let iter_result = iterret.to_object());
-
               let next_str = std::ffi::CString::new("next").unwrap();
               let next_ptr = next_str.as_ptr() as *const i8;
               let args = mozjs::jsapi::HandleValueArray::new();
               rooted!(in(cx) let mut iteration_value = UndefinedValue());
               mozjs::rust::wrappers::JS_CallFunctionName(cx, iter_result.handle(), next_ptr, &args, iteration_value.handle_mut());
 
+              /// 5. Get result.value
               let c_str = std::ffi::CString::new("value").unwrap();
               let ptr = c_str.as_ptr() as *const i8;
               rooted!(in(cx) let iteration_value_obj = iteration_value.to_object());
               rooted!(in(cx) let mut iteration_result_value = UndefinedValue());
               mozjs::rust::wrappers::JS_GetProperty(cx, iteration_value_obj.handle(), ptr, iteration_result_value.handle_mut());
-              println!("iter got {}", stringify_jsvalue(cx, &iteration_result_value));
 
+              // HACK: Store the value temporarily in the global scope.
+              // TODO: iterate and create new scopes with the values.
               let result_name = std::ffi::CString::new("each_first_result").unwrap();
               let result_name_ptr = result_name.as_ptr() as *const i8;
               rooted!(in(cx) let iter_val = iteration_result_value.clone());
-              println!("iter got -> {}", stringify_jsvalue(cx, &iter_val));
               mozjs::rust::wrappers::JS_SetProperty(cx, global.handle(), result_name_ptr, iter_val.handle());
 
+              // Return conditional generation replacements for the node.
               return CondGenFlags {
                 remove:true,
                 replace: Some(replacements)
@@ -387,6 +328,7 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
     }
 }
 
+/// Render a template.
 pub fn render(template: &mut String, variables: Value) -> String {
   let engine = JSEngine::init().unwrap();
   let rt = Runtime::new(engine);
