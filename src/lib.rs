@@ -32,6 +32,7 @@ use mozjs::jsval::JSVal;
 use mozjs::jsapi::JSContext;
 use mozjs::jsapi::JSObject;
 use mozjs::jsapi::{JS, self};
+use std::ffi::{CStr, CString};
 use std::ptr;
 // pub fn render_node_and_children(node: &mut Rc<Node>) {
 //   if let NodeData::Text { contents } = &node.data {
@@ -94,14 +95,39 @@ unsafe fn boolify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> bool {
   unimplemented!()
 }
 
-pub fn get_iterator(cx: *mut JSContext, object: *mut JSObject, name: &str) -> JSVal {
-  unsafe {
-    rooted!(in(cx) let mut rval = UndefinedValue());
-    rooted!(in(cx) let mut y = object);
-    jsapi::JS_GetProperty(cx, y.handle(), name.as_bytes(), rval.handle_mut());
-    rval.clone()
-  }
-}
+// pub fn get_symbol(cx: *mut JSContext, global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,) -> JSVal {
+//   unsafe {
+//     let c_str = std::ffi::CString::new("Symbol").unwrap();
+//     let ptr = c_str.as_ptr() as *const i8;
+
+//     rooted!(in(cx) let mut rval = UndefinedValue());
+//     if !jsapi::JS_GetProperty(cx, global.handle(), ptr, handle) {
+      
+//     }
+
+//     unimplemented!()
+//   }
+// }
+
+/// Returns the property with the given `name`, if it is a callable object,
+/// or an error otherwise.
+// pub fn get_callable_property(cx: *mut JSContext, object: *mut JSObject, name: &str) {
+//     rooted!(in(cx) let mut callable = UndefinedValue());
+//     rooted!(in(cx) let obj = object);
+//     unsafe {
+//         let c_name = CString::new(name).unwrap();
+//         if !jsapi::JS_GetProperty(cx, obj.handle(), c_name.as_ptr(), callable.get().handle_mut()) {
+          
+//         }
+
+//         // if !callable.is_object() || !IsCallable(callable.to_object()) {
+//         //     return Err(Error::Type(format!(
+//         //         "The value of the {} property is not callable",
+//         //         name
+//         //     )));
+//         // }
+//     }
+// }
 
 pub fn eval_in_engine(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, contents: &str) -> String {
   unsafe {
@@ -187,7 +213,7 @@ pub fn get_attribute(node: &Rc<Node>, key: &str) -> Option<String> {
   }
 }
 
-pub fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, node: &mut Rc<Node>) -> CondGenFlags {
+unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, node: &mut Rc<Node>) -> CondGenFlags {
     let mut flags = CondGenFlags::default();
 
     match node.data.borrow() {
@@ -229,10 +255,25 @@ pub fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::
                 }
               }
             } else if name == "x-each" {
-              let replacements : Vec<Rc<Node>> = vec![];
-              let iter = eval(&global, &rt, cx, &script).unwrap();
+              let object = eval(&global, &rt, cx, &script).unwrap();
 
-              use mozjs::jsapi::JS;
+              let replacements : Vec<Rc<Node>> = vec![];
+
+              // 1. Symbol.Iterator
+              let mut sym = mozjs::jsapi::GetWellKnownSymbol(cx, jsapi::SymbolCode::iterator);
+              let id = mozjs::glue::RUST_SYMBOL_TO_JSID(sym);
+
+              // 3. object[Symbol.iterator]
+              rooted!(in(cx) let mut fnhandle = UndefinedValue());
+              rooted!(in(cx) let obj = object.to_object());
+              if !mozjs::rust::wrappers::JS_GetPropertyById(cx, obj.handle(), mozjs::rust::Handle::new(&id), fnhandle.handle_mut()) {
+                  panic!("Couldnt get iterator")
+              }
+
+              rooted!(in(cx) let mut iterret = UndefinedValue());
+              // rooted!(in(cx) let args = mozjs::jsapi::AutoValueVector);
+              // mozjs::rust::wrappers::JS_CallFunctionValue(cx, global.handle(), fnhandle.handle(), mozjs::jsapi::AutoValueVector, iterret.handle_mut());
+
               return CondGenFlags {
                 remove:true,
                 replace: Some(replacements)
