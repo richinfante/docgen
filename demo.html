@@ -48,8 +48,11 @@
   </script>
 </head>
 <body>
-  <div x-each="[11, 22, 33, 44, 55, 66]">
-  </div>
+  <ul>
+    <li x-each="[11, 22, 33, 44, 55, 66]">
+      {{item}}
+    </li>
+  </ul>
   <div>efr: {{each_first_result}}</div>
   <div x-if="SECRET_ENABLED">
     Secret developer only content goes here!

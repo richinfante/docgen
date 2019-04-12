@@ -170,8 +170,78 @@ pub fn get_attribute(node: &Rc<Node>, key: &str) -> Option<String> {
   }
 }
 
+use html5ever::interface::Attribute;
+
+fn clone_node_data(data: &NodeData) -> NodeData {
+  match data {
+    NodeData::Document => NodeData::Document,
+    NodeData::Text { contents } => {
+      let tendril = contents.borrow();
+      NodeData::Text {
+        contents: RefCell::new(tendril.try_subtendril(0, tendril.len32()).unwrap())
+      }
+    },
+    NodeData::Doctype { name, public_id, system_id } => {
+      NodeData::Doctype {
+        name: name.try_subtendril(0, name.len32()).unwrap(),
+        public_id: public_id.try_subtendril(0, public_id.len32()).unwrap(),
+        system_id: system_id.try_subtendril(0, system_id.len32()).unwrap(),
+      }
+    },
+    NodeData::Comment { contents } => {
+      NodeData::Comment {
+        contents: contents.try_subtendril(0, contents.len32()).unwrap()
+      }
+    },
+    NodeData::ProcessingInstruction { target, contents } => {
+      NodeData::ProcessingInstruction {
+        target: target.try_subtendril(0, target.len32()).unwrap(),
+        contents: contents.try_subtendril(0, contents.len32()).unwrap()
+      }
+    }
+    NodeData::Element { name, attrs, template_contents, mathml_annotation_xml_integration_point } => {
+      NodeData::Element {
+        name: name.clone(),
+        attrs: RefCell::new(attrs.borrow().iter().map(|v| {
+          Attribute {
+            name: v.name.clone(),
+            value: v.value.try_subtendril(0, v.value.len32()).unwrap()
+          }
+        }).collect::<Vec<Attribute>>()),
+        template_contents: template_contents.clone(),
+        mathml_annotation_xml_integration_point: *mathml_annotation_xml_integration_point
+      }
+    }
+  }
+}
+use std::rc::Weak;
+use std::cell::Cell;
+
+fn deep_clone(old_node: &Rc<Node>, parent: Option<Weak<Node>>) -> Rc<Node> {
+  let mut node = Rc::new(Node {
+    children: RefCell::new(vec![]),
+    data: clone_node_data(old_node.data.borrow()),
+    parent: Cell::new(parent)
+  });
+
+  let new : Vec<Rc<Node>>;
+  let weak = std::rc::Rc::downgrade(&node);
+  {
+    new = old_node.children.borrow().iter().map(|v| {
+      deep_clone(v, Some(weak.clone()))
+    }).collect::<Vec<Rc<Node>>>();
+  }
+
+  let node_mut = node.borrow_mut();
+  node_mut.children.replace(new);
+
+  println!("deep clone info. {} kids had, {} kids found.", old_node.children.borrow().len() ,node_mut.children.borrow().len());
+
+  node
+}
+
 /// Render the children of a node, recursively.
-unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, node: &mut Rc<Node>) -> CondGenFlags {
+unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>, rt: &Runtime, cx: *mut JSContext, node: &mut Rc<Node>, loop_expansion: bool) -> CondGenFlags {
     let mut flags = CondGenFlags::default();
 
     match node.data.borrow() {
@@ -179,7 +249,7 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
         let mut children = node.children.borrow_mut();
 
         for item in children.iter_mut() {
-          render_children(global, rt, cx, item);
+          render_children(global, rt, cx, item, true);
         }
 
         return CondGenFlags::default();
@@ -195,31 +265,47 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
             }
           }
 
-          let mut attributes : RefMut<Vec<html5ever::interface::Attribute>> = attrs.borrow_mut();
+          let mut needs_expansion: Option<String> = None;
+          let mut replacements : Vec<Rc<Node>> = vec![];
+          let mut needs_remove : bool = false;
 
-          for attr in attributes.iter_mut() {
-            // println!("{:?}", attr);
-            let name = &attr.name.local.to_string();
-            let script = String::from(&attr.value);
-            if name.starts_with(":") {
-              attr.name = QualName::new(None, "".into(), name[1..].to_string().into());
-              attr.value = eval_in_engine(&global, &rt, cx, &script).into();
-            } else if name == "x-if" {
-              let included = eval_in_engine_bool(&global, &rt, cx, &script);
-              if !included {
-                return CondGenFlags {
-                  remove: true,
-                  replace: None
+          {
+            let mut attributes : RefMut<Vec<html5ever::interface::Attribute>> = attrs.borrow_mut();
+
+            for attr in attributes.iter_mut() {
+              // println!("{:?}", attr);
+              let name = &attr.name.local.to_string();
+              let script = String::from(&attr.value);
+              if name.starts_with(":") {
+                attr.name = QualName::new(None, "".into(), name[1..].to_string().into());
+                attr.value = eval_in_engine(&global, &rt, cx, &script).into();
+              } else if name == "x-if" {
+                let included = eval_in_engine_bool(&global, &rt, cx, &script);
+                if !included {
+                  return CondGenFlags {
+                    remove: true,
+                    replace: None
+                  }
                 }
+              } else if name == "x-each" && loop_expansion {
+                needs_expansion = Some(script);
               }
-            } else if name == "x-each" {
+            }
+          }
+
+          if let Some(script) = needs_expansion {
+            if loop_expansion {
+              println!("begin loop expansion on {:?}", name);
               // 0. Run the script and setup replacement list.
               let object = eval(&global, &rt, cx, &script).unwrap();
-              let replacements : Vec<Rc<Node>> = vec![];
 
               // 1. Symbol.Iterator
               let mut sym = mozjs::jsapi::GetWellKnownSymbol(cx, jsapi::SymbolCode::iterator);
               let id = mozjs::glue::RUST_SYMBOL_TO_JSID(sym);
+
+              if !object.is_object() {
+                println!("eval returned non-object!");
+              }
 
               // 2. object[Symbol.iterator]
               rooted!(in(cx) let mut fnhandle = UndefinedValue());
@@ -234,34 +320,68 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
               let args = mozjs::jsapi::HandleValueArray::new();
               mozjs::rust::wrappers::JS_CallFunction(cx, obj.handle(), func.handle(), &args, iterret.handle_mut());
               
-              
-              // 4. Call the iterator.next() function
-              rooted!(in(cx) let mut returnvalue = UndefinedValue());
-              rooted!(in(cx) let iter_result = iterret.to_object());
-              let next_str = std::ffi::CString::new("next").unwrap();
-              let next_ptr = next_str.as_ptr() as *const i8;
-              let args = mozjs::jsapi::HandleValueArray::new();
-              rooted!(in(cx) let mut iteration_value = UndefinedValue());
-              mozjs::rust::wrappers::JS_CallFunctionName(cx, iter_result.handle(), next_ptr, &args, iteration_value.handle_mut());
+              loop {
+                needs_remove = true;
+                println!("iterating thing...");
+                // 4. Call the iterator.next() function
+                rooted!(in(cx) let mut returnvalue = UndefinedValue());
+                rooted!(in(cx) let iter_result = iterret.to_object());
+                let next_str = std::ffi::CString::new("next").unwrap();
+                let next_ptr = next_str.as_ptr() as *const i8;
+                let args = mozjs::jsapi::HandleValueArray::new();
+                rooted!(in(cx) let mut iteration_value = UndefinedValue());
+                mozjs::rust::wrappers::JS_CallFunctionName(cx, iter_result.handle(), next_ptr, &args, iteration_value.handle_mut());
 
-              /// 5. Get result.value
-              let c_str = std::ffi::CString::new("value").unwrap();
-              let ptr = c_str.as_ptr() as *const i8;
-              rooted!(in(cx) let iteration_value_obj = iteration_value.to_object());
-              rooted!(in(cx) let mut iteration_result_value = UndefinedValue());
-              mozjs::rust::wrappers::JS_GetProperty(cx, iteration_value_obj.handle(), ptr, iteration_result_value.handle_mut());
+                if !iteration_value.is_object() {
+                  println!("iteration is not obj");
+                  break
+                }
 
-              // HACK: Store the value temporarily in the global scope.
-              // TODO: iterate and create new scopes with the values.
-              let result_name = std::ffi::CString::new("each_first_result").unwrap();
-              let result_name_ptr = result_name.as_ptr() as *const i8;
-              rooted!(in(cx) let iter_val = iteration_result_value.clone());
-              mozjs::rust::wrappers::JS_SetProperty(cx, global.handle(), result_name_ptr, iter_val.handle());
+                /// 5. Get result.value
+                rooted!(in(cx) let mut iteration_result_value = UndefinedValue());
 
-              // Return conditional generation replacements for the node.
-              return CondGenFlags {
-                remove:true,
-                replace: Some(replacements)
+                if iteration_value.is_object() {
+                  let c_str = std::ffi::CString::new("value").unwrap();
+                  let ptr = c_str.as_ptr() as *const i8;
+                  rooted!(in(cx) let iteration_value_obj = iteration_value.to_object());
+                  mozjs::rust::wrappers::JS_GetProperty(cx, iteration_value_obj.handle(), ptr, iteration_result_value.handle_mut());
+                }
+
+                println!("iter value -> {}", stringify_jsvalue(cx, &iteration_result_value));
+
+                /// 6. Check if iterator is done
+                let done_str = std::ffi::CString::new("done").unwrap();
+                let done_str_ptr = done_str.as_ptr() as *const i8;
+                rooted!(in(cx) let iteration_value_obj = iteration_value.to_object());
+                rooted!(in(cx) let mut iteration_done_value = UndefinedValue());
+                mozjs::rust::wrappers::JS_GetProperty(cx, iteration_value_obj.handle(), done_str_ptr, iteration_done_value.handle_mut());
+                println!("iter done -> {}", stringify_jsvalue(cx, &iteration_done_value));
+
+                // Boolify javascript
+                if boolify_jsvalue(cx, &iteration_done_value) {
+                  println!("is done. return.");
+                  break
+                }
+
+                // HACK: Store the value temporarily in the global scope.
+                // TODO: iterate and create new scopes with the values.
+                let result_name = std::ffi::CString::new("item").unwrap();
+                let result_name_ptr = result_name.as_ptr() as *const i8;
+                rooted!(in(cx) let iter_val = iteration_result_value.clone());
+                mozjs::rust::wrappers::JS_SetProperty(cx, global.handle(), result_name_ptr, iter_val.handle());
+
+                // Mut and render
+                let x = node.parent.replace(None);
+                let parent: Option<Weak<Node>>;
+                if let Some(x) = x {
+                  parent = Some(x.clone());
+                } else {
+                  parent = None;
+                }
+
+                let mut expand_node = deep_clone(node, parent);
+                render_children(global, rt, cx, &mut expand_node, false);
+                replacements.push(expand_node);
               }
             }
           }
@@ -270,13 +390,16 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
           //   name: QualName::new(None, "".into(), "x-generated-ssr".into()),
           //   value: "true".into()
           // });
+
+          println!("Rendering children...");
           let mut out_children : Vec<Rc<Node>> = vec![];
 
           {
             let mut children = node.children.borrow_mut();
-
+            println!("have {} children.", children.len());
             for item in children.iter_mut() {
-              let flags = render_children(global, rt, cx, item);
+              println!("Rendering child...");
+              let flags = render_children(global, rt, cx, item, true);
 
               if !flags.remove {
                 out_children.push(item.clone())
@@ -290,9 +413,14 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
             }
           }
 
+          println!("render done. injecting kids.");
+
           node.children.replace(out_children);
 
-          return CondGenFlags::default();
+          CondGenFlags {
+            replace: Some(replacements),
+            remove: needs_remove
+          }
       },
       NodeData::Text { contents } => {
         let mut tendril = contents.borrow_mut();
@@ -306,6 +434,7 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
         let result = regex.replace_all(&x, |caps: &Captures| {
           if let Some(code) = caps.get(0) {
             let string : &str = code.into();
+            println!("render var: {}", string);
             return eval_in_engine(&global, rt, cx, string)
           }
 
@@ -388,7 +517,7 @@ pub fn render(template: &mut String, variables: Value) -> String {
         let document : &Node = dom.document.borrow();
         let mut docchildren: RefMut<Vec<Rc<Node>>> = document.children.borrow_mut();
         for a in docchildren.iter_mut() {
-          render_children(&global, &rt, cx, a);
+          render_children(&global, &rt, cx, a, true);
         }
       }
 
