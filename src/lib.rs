@@ -270,9 +270,53 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
                   panic!("Couldnt get iterator")
               }
 
+              println!("{} {} {}", fnhandle.is_undefined(), fnhandle.is_null(), fnhandle.is_object());
+
+              // // rooted!(in(cx) let args = mozjs::jsapi::AutoValueVector);
+
+              let empty_args : mozjs::jsapi::HandleValueArray = mozjs::jsapi::HandleValueArray::new();
+              let rp = &empty_args as *const mozjs::jsapi::HandleValueArray;
+
+              println!("{:?} {:?}", empty_args, rp);
+
+              // let pt = x.as_ptr() as *const mozjs::jsapi::HandleValueArray;
+
               rooted!(in(cx) let mut iterret = UndefinedValue());
-              // rooted!(in(cx) let args = mozjs::jsapi::AutoValueVector);
-              // mozjs::rust::wrappers::JS_CallFunctionValue(cx, global.handle(), fnhandle.handle(), mozjs::jsapi::AutoValueVector, iterret.handle_mut());
+              rooted!(in(cx) let func = mozjs::rust::wrappers::JS_ValueToFunction(cx, fnhandle.handle()));
+
+              // let c_str = std::ffi::CString::new("fn1").unwrap();
+              // let ptr = c_str.as_ptr() as *const i8;
+
+              // println!("generated fn");
+
+              
+              // mozjs::rust::jsapi_wrapped::JS_CallFunctionName(cx, global.handle(), ptr, &empty_args, &mut iterret.handle_mut());
+          
+              let args = mozjs::jsapi::HandleValueArray::new();
+              mozjs::rust::wrappers::JS_CallFunction(cx, obj.handle(), func.handle(), &args, iterret.handle_mut());
+              
+              
+              rooted!(in(cx) let mut returnvalue = UndefinedValue());
+              rooted!(in(cx) let iter_result = iterret.to_object());
+
+              let next_str = std::ffi::CString::new("next").unwrap();
+              let next_ptr = next_str.as_ptr() as *const i8;
+              let args = mozjs::jsapi::HandleValueArray::new();
+              rooted!(in(cx) let mut iteration_value = UndefinedValue());
+              mozjs::rust::wrappers::JS_CallFunctionName(cx, iter_result.handle(), next_ptr, &args, iteration_value.handle_mut());
+
+              let c_str = std::ffi::CString::new("value").unwrap();
+              let ptr = c_str.as_ptr() as *const i8;
+              rooted!(in(cx) let iteration_value_obj = iteration_value.to_object());
+              rooted!(in(cx) let mut iteration_result_value = UndefinedValue());
+              mozjs::rust::wrappers::JS_GetProperty(cx, iteration_value_obj.handle(), ptr, iteration_result_value.handle_mut());
+              println!("iter got {}", stringify_jsvalue(cx, &iteration_result_value));
+
+              let result_name = std::ffi::CString::new("each_first_result").unwrap();
+              let result_name_ptr = result_name.as_ptr() as *const i8;
+              rooted!(in(cx) let iter_val = iteration_result_value.clone());
+              println!("iter got -> {}", stringify_jsvalue(cx, &iter_val));
+              mozjs::rust::wrappers::JS_SetProperty(cx, global.handle(), result_name_ptr, iter_val.handle());
 
               return CondGenFlags {
                 remove:true,
@@ -354,13 +398,37 @@ pub fn render(template: &mut String, variables: Value) -> String {
                               &CompartmentOptions::default())
       );
 
+    // NOTE: this line is important, without it all JS_ calls seem to segfault.
+    let _ac = mozjs::jsapi::JSAutoCompartment::new(cx, global.get());
+    assert!(mozjs::rust::wrappers::JS_InitStandardClasses(cx, global.handle()));
+
       // TODO: this is bad code.
       eval(&global, &rt, cx, &format!(r###"
       docgen = {{
         version: "{}"
       }};
+
+      function fn1() {{
+        return 1337
+      }}
+
+      let val1 = 7331
 "###, env!("CARGO_PKG_VERSION")));
 
+    let empty_args : mozjs::jsapi::HandleValueArray = mozjs::jsapi::HandleValueArray::new();
+    // let rp = &empty_args as *const mozjs::jsapi::HandleValueArray;
+    // println!("{:?} {:?}", empty_args, rp);
+
+    // println!("rooting undefined.");
+    // rooted!(in(cx) let mut iterret = UndefinedValue());
+    // let c_str = std::ffi::CString::new("fn1").unwrap();
+    // let ptr = c_str.as_ptr() as *const i8;
+    // println!("creating thing: {:?}", ptr);
+
+    // // mozjs::rust::wrappers::JS_GetProperty(cx, global.handle(), ptr, iterret.handle_mut());
+    // mozjs::rust::jsapi_wrapped::JS_CallFunctionName(cx, global.handle(), ptr, &empty_args, &mut iterret.handle_mut());
+    // println!("Stringified: {}", stringify_jsvalue(cx, &iterret));
+    // println!("Done!");
     let opts = ParseOpts {
           tree_builder: TreeBuilderOpts {
               drop_doctype: false,

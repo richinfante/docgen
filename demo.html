@@ -48,11 +48,17 @@
   </script>
 </head>
 <body>
+  <div x-each="[67, 68, 69]">
+  </div>
+  <div>efr: {{each_first_result}}</div>
+
   <div x-if="SECRET_ENABLED">
     Secret developer only content goes here!
     <div>Built at: {{new Date().toLocaleString()}}</div>
     <div>DocGen Version: {{docgen.version}}</div>
+    fn1 result: {{fn1()}}
   </div>
+
   <div class="banner">
     <div class="container">
       <header>
