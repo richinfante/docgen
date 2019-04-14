@@ -75,28 +75,14 @@ At the moment, docgen only produces processes html templates. This will change i
 ```html
 <html>
 <head>
-  <!-- TODO: remove ssr scripts when rendering -->
-  <script ssr="true">
-  let links = [{
-    href: 'https://google.com',
-    title: 'google'
-  }, {
-    href: 'https://apple.com',
-    title: 'apple'
-  },{
-    href: 'https://amazon.com',
-    title: 'amazon'
-  }]
-  </script>
 </head>
 <body>
   <ul>
-    <!-- TODO: remove iteration attributes -->
-    <li x-each="links">
+    <li>
       <a href="https://google.com">google</a>
-    </li><li x-each="links">
+    </li><li>
       <a href="https://apple.com">apple</a>
-    </li><li x-each="links">
+    </li><li>
       <a href="https://amazon.com">amazon</a>
     </li>
   </ul> 
