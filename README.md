@@ -66,6 +66,7 @@ At the moment, docgen only produces processes pure html templates. This will cha
 </head>
 <body>
   <ul>
+    <!-- TODO: remove iteration attributes -->
     <li x-each="links">
       <a href="https://google.com">google</a>
     </li><li x-each="links">
