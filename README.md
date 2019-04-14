@@ -1,7 +1,7 @@
 # docgen
 Docgen is a static site renderer which is built using servo's html5ever and spidermonkey. It aims to make static site generation to be effortless and removing templating languages such as liquid.
 
-Docgen's syntax is based on / inspired by the syntax used by vuejs's templates.
+Docgen's template syntax is based on / inspired by the syntax used by vuejs's templates. the rationale behind this is that all templates become valid HTML pages and do not need extra text nodes containing the conditional logic. (like liquid, mustache, others..). This means pages can be developed and tested in their pure template form, without needing much (or any) tooling to do so in a nice way.
 
 **NOTE: Docgen is experimental software. It's not feature complete, and doesn't work half the time. It's extremely unstable, and this repo is published mostly for feedback purposes.**
 
@@ -33,7 +33,7 @@ cat demo.html | cargo run
 At the moment, docgen only produces processes pure html templates. This will change in the future, with options for markdown, etc.
 
 ### Source Template
-```
+```html
 <html>
 <head>
   <script ssr="true">
@@ -64,7 +64,7 @@ At the moment, docgen only produces processes pure html templates. This will cha
 ```
 
 ### Result Output
-```
+```html
 <html>
 <head>
   <!-- TODO: remove ssr scripts when rendering -->
@@ -94,4 +94,47 @@ At the moment, docgen only produces processes pure html templates. This will cha
   </ul> 
 </body>
 </html>
+```
+
+## Converting from liquid
+### If statements
+```html
+{% if variable_name %}
+<span>Hello, World!</span>
+{% endif %}
+```
+
+```html
+<span x-if="variable_name">Hello, World</span>
+```
+
+### Attribute bindings
+```html
+<span class="{{className}}">Test</span>
+```
+
+Note: the `:class` binding *may* be updated in the future to allow a dictionary, which in turn renders to a space-separated class string based on all the keys that have truthy values.
+```html
+<span :class="className">Test</span>
+```
+
+
+### For loops
+note: for loops are not feature complete. All for loops currently bind to `item` and the syntax is likely to change.
+```html
+<ul>
+{% for item in items %}
+  <li>
+    <a href="{{item.url}}">{{item.title}}</a>
+  </li>
+{% endfor %}
+</ul>
+```
+
+```html
+<ul>
+  <li x-for="items">
+    <a :href="item.url">{{item.title}}</a>
+  </li>
+</ul>
 ```
