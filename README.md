@@ -11,31 +11,34 @@ Templates also allow <script> tags to be run (At compile time) with the `ssr="tr
 Please note that the generation does **NOT** currently expose the normal javascript dom api, such as `document.createElement`, etc. It is an empty javascript context only used for templating. If this feature would be useful to you, file an issue with use cases / info.
 
 ## Feature Roadmap
-these are features I'd like to have, in no particular order.
+these are features I'd like to have initially, in no particular order.
 - [x] add html parser
 - [x] add js engine
 - [x] conditional logic with `x-if` (tentative name)
 - [x] attribute variable expansion (`:href="link.title"` with `link = { title: 'HI' }` -> `href="HI"`)
 - [ ] iteration logic with `x-each` (tentative name) **Experimentally Implemented**
 - [ ] conditional css class generation (similar to vuejs's :class attribute).
+- [ ] html partials via `<template src="" />` tag.
 - [ ] json/yaml/etc data file loading for configuration / data.
 - [ ] markdown support with front-matter data + rendering (similar to jekyll)
 - [ ] page-fork rendering: instead of iterating a page via `x-each`, render multiple copies of a page with different elements. To be used for dynamic tagging.
+- [ ] helper application to call the main `docgen` binary for site generation. This is the template engine, from which the actual site generator will discover supported template pages and render them for upload.
 
-## Build
+## Building from source
 ```bash
 brew install yasm
 set AUTOCONF="$(which autoconf)"
 cargo build
 ```
 
-## Run
+## Runing example
+We currently read input templates from stdin.
 ```bash
 cat demo.html | cargo run
 ```
 
 ## Template Examples
-At the moment, docgen only produces processes pure html templates. This will change in the future, with options for markdown, etc.
+At the moment, docgen only produces processes html templates. This will change in the future, with options for markdown, etc.
 
 ### Source Template
 ```html
