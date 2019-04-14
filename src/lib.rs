@@ -25,6 +25,9 @@ use mozjs::jsapi::JSContext;
 use mozjs::jsapi::JSObject;
 use mozjs::jsapi::{JS, self};
 
+#[macro_use]
+extern crate log;
+
 use std::collections::HashMap;
 use std::default::Default;
 use std::io::{self, Write};
@@ -235,7 +238,7 @@ fn deep_clone(old_node: &Rc<Node>, parent: Option<Weak<Node>>) -> Rc<Node> {
   let node_mut = node.borrow_mut();
   node_mut.children.replace(new);
 
-  println!("deep clone info. {} kids had, {} kids found.", old_node.children.borrow().len() ,node_mut.children.borrow().len());
+  debug!("deep clone info. {} kids had, {} kids found.", old_node.children.borrow().len() ,node_mut.children.borrow().len());
 
   node
 }
@@ -256,29 +259,36 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
 
       },
       NodeData::Element { name, attrs, .. } => {
-          // println!("element name: {:?}", name);
+          // debug!("element name: {:?}", name);
 
           if name.local.to_string() == "script" {
             if get_attribute(&node, "ssr") == Some("true".to_string()) {
               let script = inner_text(node);
               eval_in_engine(&global, &rt, cx, &script);
             }
+
+            return CondGenFlags {
+              remove: true,
+              replace: None
+            }
           }
 
           let mut needs_expansion: Option<String> = None;
           let mut replacements : Vec<Rc<Node>> = vec![];
           let mut needs_remove : bool = false;
+          let mut final_attrs : Vec<html5ever::interface::Attribute> = vec![];
 
           {
             let mut attributes : RefMut<Vec<html5ever::interface::Attribute>> = attrs.borrow_mut();
 
             for attr in attributes.iter_mut() {
-              // println!("{:?}", attr);
+              // debug!("{:?}", attr);
               let name = &attr.name.local.to_string();
               let script = String::from(&attr.value);
               if name.starts_with(":") {
                 attr.name = QualName::new(None, "".into(), name[1..].to_string().into());
                 attr.value = eval_in_engine(&global, &rt, cx, &script).into();
+                final_attrs.push(attr.clone());
               } else if name == "x-if" {
                 let included = eval_in_engine_bool(&global, &rt, cx, &script);
                 if !included {
@@ -289,13 +299,17 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
                 }
               } else if name == "x-each" && loop_expansion {
                 needs_expansion = Some(script);
+              } else {
+                final_attrs.push(attr.clone());
               }
             }
           }
 
+          attrs.replace(final_attrs);
+
           if let Some(script) = needs_expansion {
             if loop_expansion {
-              println!("begin loop expansion on {:?}", name);
+              debug!("begin loop expansion on {:?}", name);
               // 0. Run the script and setup replacement list.
               let object = eval(&global, &rt, cx, &script).unwrap();
 
@@ -304,7 +318,7 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
               let id = mozjs::glue::RUST_SYMBOL_TO_JSID(sym);
 
               if !object.is_object() {
-                println!("eval returned non-object!");
+                debug!("eval returned non-object!");
               }
 
               // 2. object[Symbol.iterator]
@@ -322,7 +336,7 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
               
               loop {
                 needs_remove = true;
-                println!("iterating thing...");
+                debug!("iterating thing...");
                 // 4. Call the iterator.next() function
                 rooted!(in(cx) let mut returnvalue = UndefinedValue());
                 rooted!(in(cx) let iter_result = iterret.to_object());
@@ -333,7 +347,7 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
                 mozjs::rust::wrappers::JS_CallFunctionName(cx, iter_result.handle(), next_ptr, &args, iteration_value.handle_mut());
 
                 if !iteration_value.is_object() {
-                  println!("iteration is not obj");
+                  debug!("iteration is not obj");
                   break
                 }
 
@@ -347,7 +361,7 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
                   mozjs::rust::wrappers::JS_GetProperty(cx, iteration_value_obj.handle(), ptr, iteration_result_value.handle_mut());
                 }
 
-                // println!("iter value -> {}", stringify_jsvalue(cx, &iteration_result_value));
+                // debug!("iter value -> {}", stringify_jsvalue(cx, &iteration_result_value));
 
                 /// 6. Check if iterator is done
                 let done_str = std::ffi::CString::new("done").unwrap();
@@ -355,11 +369,11 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
                 rooted!(in(cx) let iteration_value_obj = iteration_value.to_object());
                 rooted!(in(cx) let mut iteration_done_value = UndefinedValue());
                 mozjs::rust::wrappers::JS_GetProperty(cx, iteration_value_obj.handle(), done_str_ptr, iteration_done_value.handle_mut());
-                println!("iter done -> {}", stringify_jsvalue(cx, &iteration_done_value));
+                debug!("iter done -> {}", stringify_jsvalue(cx, &iteration_done_value));
 
                 // Boolify javascript
                 if boolify_jsvalue(cx, &iteration_done_value) {
-                  println!("is done. return.");
+                  debug!("is done. return.");
                   break
                 }
 
@@ -391,14 +405,14 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
           //   value: "true".into()
           // });
 
-          println!("Rendering children...");
+          debug!("Rendering children...");
           let mut out_children : Vec<Rc<Node>> = vec![];
 
           {
             let mut children = node.children.borrow_mut();
-            println!("have {} children.", children.len());
+            debug!("have {} children.", children.len());
             for item in children.iter_mut() {
-              println!("Rendering child...");
+              debug!("Rendering child...");
               let flags = render_children(global, rt, cx, item, true);
 
               if !flags.remove {
@@ -413,7 +427,7 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
             }
           }
 
-          println!("render done. injecting kids.");
+          debug!("render done. injecting kids.");
 
           node.children.replace(out_children);
 
@@ -427,14 +441,14 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
         // let contents : String = tendril.into();
         let x = format!("{}", tendril);
 
-        // println!("Text Node: {}", x);
+        // debug!("Text Node: {}", x);
 
         let regex = Regex::new(r###"\{\{(.*?)\}\}"###).unwrap();
 
         let result = regex.replace_all(&x, |caps: &Captures| {
           if let Some(code) = caps.get(0) {
             let string : &str = code.into();
-            println!("render var: {}", string);
+            debug!("render var: {}", string);
             return eval_in_engine(&global, rt, cx, string)
           }
 
@@ -473,33 +487,31 @@ pub fn render(template: &mut String, variables: Value) -> String {
     let _ac = mozjs::jsapi::JSAutoCompartment::new(cx, global.get());
     assert!(mozjs::rust::wrappers::JS_InitStandardClasses(cx, global.handle()));
 
+    let spidermonkey_version = mozjs::jsapi::JS_GetImplementationVersion();
+    let spidermonkey_version_c_str: &CStr = unsafe { CStr::from_ptr(spidermonkey_version) };
+    let spidermonkey_version_str_slice: &str = spidermonkey_version_c_str.to_str().unwrap();
       // TODO: this is bad code.
       eval(&global, &rt, cx, &format!(r###"
       docgen = {{
-        version: "{}"
+        version: "{}",
+        spidermonkey_version: "{}"
       }};
-
-      function fn1() {{
-        return 1337
-      }}
-
-      let val1 = 7331
-"###, env!("CARGO_PKG_VERSION")));
+"###, env!("CARGO_PKG_VERSION"), spidermonkey_version_str_slice));
 
     let empty_args : mozjs::jsapi::HandleValueArray = mozjs::jsapi::HandleValueArray::new();
     // let rp = &empty_args as *const mozjs::jsapi::HandleValueArray;
-    // println!("{:?} {:?}", empty_args, rp);
+    // debug!("{:?} {:?}", empty_args, rp);
 
-    // println!("rooting undefined.");
+    // debug!("rooting undefined.");
     // rooted!(in(cx) let mut iterret = UndefinedValue());
     // let c_str = std::ffi::CString::new("fn1").unwrap();
     // let ptr = c_str.as_ptr() as *const i8;
-    // println!("creating thing: {:?}", ptr);
+    // debug!("creating thing: {:?}", ptr);
 
     // // mozjs::rust::wrappers::JS_GetProperty(cx, global.handle(), ptr, iterret.handle_mut());
     // mozjs::rust::jsapi_wrapped::JS_CallFunctionName(cx, global.handle(), ptr, &empty_args, &mut iterret.handle_mut());
-    // println!("Stringified: {}", stringify_jsvalue(cx, &iterret));
-    // println!("Done!");
+    // debug!("Stringified: {}", stringify_jsvalue(cx, &iterret));
+    // debug!("Done!");
     let opts = ParseOpts {
           tree_builder: TreeBuilderOpts {
               drop_doctype: false,

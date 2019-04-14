@@ -44,7 +44,7 @@
   <link rel="stylesheet" href="/css/style.css" inline>
   <script ssr="true">
   x = 1337;
-  let SECRET_ENABLED = true;
+  let DEBUG = true;
   let links = [{
     href: 'https://google.com',
     title: 'google'
@@ -63,12 +63,11 @@
       <a :href="item.href">{{item.title}}</a>
     </li>
   </ul>
-  <div>efr: {{each_first_result}}</div>
-  <div x-if="SECRET_ENABLED">
-    Secret developer only content goes here!
-    <div>Built at: {{new Date().toLocaleString()}}</div>
-    <div>DocGen Version: {{docgen.version}}</div>
-    fn1 result: {{fn1()}}
+
+  <div x-if="DEBUG">
+    <div><b>Built at:</b> {{new Date().toLocaleString()}}</div>
+    <div><b>DocGen Version:</b> {{docgen.version}}</div>
+    <div><b>SpiderMonkey Version:</b> {{docgen.spidermonkey_version}}</div>
   </div>
 
   <div class="banner">
@@ -127,7 +126,6 @@
 
         </div>
         <div class="copyright">copyright &copy; 2015-{{new Date().getFullYear()}} rich infante. All Rights Reserved.</div>
-        {{x}}
       </div>
     </footer>
   </div>
