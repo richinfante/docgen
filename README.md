@@ -1,4 +1,21 @@
 # docgen
+Docgen is a static site renderer which is built using servo's html5ever and spidermonkey. It aims to make static site generation to be effortless and removing templating languages such as liquid.
+
+Docgen's syntax is based on / inspired by the syntax used by vuejs's templates.
+
+**NOTE: Docgen is experimental software. It's not feature complete, and doesn't work half the time. It's extremely unstable, and this repo is published mostly for feedback purposes.**
+
+## Feature Roadmap
+these are features I'd like to have, in no particular order.
+- [x] add html parser
+- [x] add js engine
+- [x] conditional logic with `x-if` (tentative name)
+- [x] attribute variable expansion (`:href="link.title"` with `link = { title: 'HI' }` -> `href="HI"`)
+- [ ] iteration logic with `x-each` (tentative name) **Experimentally Implemented**
+- [ ] conditional css class generation (similar to vuejs's :class attribute).
+- [ ] json/yaml/etc data file loading for configuration / data.
+- [ ] markdown support with front-matter data + rendering (similar to jekyll)
+- [ ] page-fork rendering: instead of iterating a page via `x-each`, render multiple copies of a page with different elements. To be used for dynamic tagging.
 
 ## Build
 ```bash
