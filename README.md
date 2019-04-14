@@ -1,9 +1,14 @@
 # docgen
+
+**NOTE: Docgen is experimental software. It's not feature complete, and doesn't work half the time. It's extremely unstable, and this repo is published mostly for feedback purposes. No not rely on this software.**
+
 Docgen is a static site renderer which is built using servo's html5ever and spidermonkey. It aims to make static site generation to be effortless and removing templating languages such as liquid.
 
-Docgen's template syntax is based on / inspired by the syntax used by vuejs's templates. the rationale behind this is that all templates become valid HTML pages and do not need extra text nodes containing the conditional logic. (like liquid, mustache, others..). This means pages can be developed and tested in their pure template form, without needing much (or any) tooling to do so in a nice way.
+Docgen's template syntax is based on / inspired by the syntax used by vuejs's templates. the rationale behind this is that all templates become are normal HTML pages and do not need extra text nodes containing the conditional / template logic. (like liquid, mustache, others..). This means pages can be developed and tested in their pure template form, without needing much (or any) tooling to do so in a nice way.
 
-**NOTE: Docgen is experimental software. It's not feature complete, and doesn't work half the time. It's extremely unstable, and this repo is published mostly for feedback purposes.**
+Templates also allow <script> tags to be run (At compile time) with the `ssr="true"` attribute set.
+  
+Please note that the generation does **NOT** currently expose the normal javascript dom api, such as `document.createElement`, etc. It is an empty javascript context only used for templating. If this feature would be useful to you, file an issue with use cases / info.
 
 ## Feature Roadmap
 these are features I'd like to have, in no particular order.
