@@ -347,7 +347,7 @@ unsafe fn render_children(global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsap
                   mozjs::rust::wrappers::JS_GetProperty(cx, iteration_value_obj.handle(), ptr, iteration_result_value.handle_mut());
                 }
 
-                println!("iter value -> {}", stringify_jsvalue(cx, &iteration_result_value));
+                // println!("iter value -> {}", stringify_jsvalue(cx, &iteration_result_value));
 
                 /// 6. Check if iterator is done
                 let done_str = std::ffi::CString::new("done").unwrap();

@@ -45,12 +45,22 @@
   <script ssr="true">
   x = 1337;
   let SECRET_ENABLED = true;
+  let links = [{
+    href: 'https://google.com',
+    title: 'google'
+  }, {
+    href: 'https://apple.com',
+    title: 'apple'
+  },{
+    href: 'https://amazon.com',
+    title: 'amazon'
+  }]
   </script>
 </head>
 <body>
   <ul>
-    <li x-each="[11, 22, 33, 44, 55, 66]">
-      {{item}}
+    <li x-each="links">
+      <a :href="item.href">{{item.title}}</a>
     </li>
   </ul>
   <div>efr: {{each_first_result}}</div>
