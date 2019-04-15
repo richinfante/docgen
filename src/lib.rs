@@ -37,6 +37,9 @@ use std::io::{self, Write};
 use std::ptr;
 use std::rc::Rc;
 
+mod frontmatter;
+mod render;
+
 /// Stringify a jsval into a rust string for injection into the template
 unsafe fn stringify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> String {
     if rval.is_number() {
@@ -275,6 +278,7 @@ unsafe fn render_children(
     cx: *mut JSContext,
     node: &mut Rc<Node>,
     loop_expansion: bool,
+    slot_contents: Rc<Option<html5ever::rcdom::RcDom>>,
 ) -> CondGenFlags {
     let mut flags = CondGenFlags::default();
 
@@ -283,7 +287,7 @@ unsafe fn render_children(
             let mut children = node.children.borrow_mut();
 
             for item in children.iter_mut() {
-                render_children(global, rt, cx, item, true);
+                render_children(global, rt, cx, item, true, slot_contents.clone());
             }
 
             return CondGenFlags::default();
@@ -330,6 +334,17 @@ unsafe fn render_children(
                         }
                     } else if name == "x-each" && loop_expansion {
                         needs_expansion = Some(script);
+                    } else if name == "x-content-slot" {
+                        if let Some(contents) = slot_contents.clone().borrow() {
+                            debug!("swapping slot contents into dom tree.");
+                            let doc: &Node = contents.document.borrow();
+                            let children: Ref<Vec<Rc<Node>>> = doc.children.borrow();
+                            let html: &Node = children[0].borrow();
+                            let html_children = html.children.borrow();
+                            let body: &Node = html_children[1].borrow();
+                            let body_children = &body.children;
+                            node.children.swap(&body_children);
+                        }
                     } else {
                         final_attrs.push(attr.clone());
                     }
@@ -460,7 +475,14 @@ unsafe fn render_children(
                         }
 
                         let mut expand_node = deep_clone(node, parent);
-                        render_children(global, rt, cx, &mut expand_node, false);
+                        render_children(
+                            global,
+                            rt,
+                            cx,
+                            &mut expand_node,
+                            false,
+                            slot_contents.clone(),
+                        );
                         replacements.push(expand_node);
                     }
                 }
@@ -479,7 +501,7 @@ unsafe fn render_children(
                 debug!("have {} children.", children.len());
                 for item in children.iter_mut() {
                     debug!("Rendering child...");
-                    let flags = render_children(global, rt, cx, item, true);
+                    let flags = render_children(global, rt, cx, item, true, slot_contents.clone());
 
                     if !flags.remove {
                         out_children.push(item.clone())
@@ -534,27 +556,21 @@ unsafe fn render_children(
 }
 
 /// Render a template.
-pub fn render(template: &mut String, variables: Option<Value>) -> String {
-    let engine = JSEngine::init().unwrap();
-    let rt = Runtime::new(engine);
-    let cx = rt.cx();
+pub fn render_dom(
+    global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,
+    rt: &Runtime,
+    cx: *mut JSContext,
+    template: &mut String,
+    variables: Option<Value>,
+    slot_contents: Rc<Option<html5ever::rcdom::RcDom>>,
+) -> html5ever::rcdom::RcDom {
     unsafe {
-        rooted!(in(cx) let global =
-            JS_NewGlobalObject(cx, &SIMPLE_GLOBAL_CLASS, ptr::null_mut(),
-                                OnNewGlobalHookOption::FireOnNewGlobalHook,
-                                &CompartmentOptions::default())
-        );
-
         // NOTE: this line is important, without it all JS_ calls seem to segfault.
-        let _ac = mozjs::jsapi::JSAutoCompartment::new(cx, global.get());
-        assert!(mozjs::rust::wrappers::JS_InitStandardClasses(
-            cx,
-            global.handle()
-        ));
 
         let spidermonkey_version = mozjs::jsapi::JS_GetImplementationVersion();
         let spidermonkey_version_c_str: &CStr = unsafe { CStr::from_ptr(spidermonkey_version) };
         let spidermonkey_version_str_slice: &str = spidermonkey_version_c_str.to_str().unwrap();
+
         // TODO: this is bad code.
         eval(
             &global,
@@ -562,11 +578,13 @@ pub fn render(template: &mut String, variables: Option<Value>) -> String {
             cx,
             &format!(
                 r###"
-      docgen = {{
-        version: "{}",
-        spidermonkey_version: "{}"
-      }};
-"###,
+                    docgen = {{
+                        version: "{}",
+                        spidermonkey_version: "{}"
+                    }};
+
+                    layout = null;
+                "###,
                 env!("CARGO_PKG_VERSION"),
                 spidermonkey_version_str_slice
             ),
@@ -593,6 +611,7 @@ pub fn render(template: &mut String, variables: Option<Value>) -> String {
             },
             ..Default::default()
         };
+
         // let stdin = io::stdin();
         let dom = parse_document(RcDom::default(), opts)
             .from_utf8()
@@ -603,21 +622,146 @@ pub fn render(template: &mut String, variables: Option<Value>) -> String {
             let document: &Node = dom.document.borrow();
             let mut docchildren: RefMut<Vec<Rc<Node>>> = document.children.borrow_mut();
             for a in docchildren.iter_mut() {
-                render_children(&global, &rt, cx, a, true);
+                render_children(&global, &rt, cx, a, true, slot_contents.clone());
             }
         }
 
-        // The validator.nu HTML2HTML always prints a doctype at the very beginning.
-        // io::stdout()
-        //     .write_all(b"<!DOCTYPE html>\n")
-        //     .ok()
-        //     .expect("writing DOCTYPE failed");
-        let mut buffer = vec![];
+        dom
+    }
+}
 
-        serialize(&mut buffer, &dom.document, Default::default())
-            .ok()
-            .expect("serialization failed");
+pub fn init_js() -> (Runtime, *mut JSContext) {
+    let engine = JSEngine::init().unwrap();
+    let rt = Runtime::new(engine);
+    let cx = rt.cx();
+    (rt, cx)
+}
 
-        return String::from_utf8(buffer).unwrap();
+pub fn render_injecting(
+    global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,
+    rt: &Runtime,
+    cx: *mut JSContext,
+    template: &mut String,
+    variables: Option<Value>,
+    inject_dom: Rc<Option<html5ever::rcdom::RcDom>>,
+) -> String {
+    let dom = render_dom(&global, rt, cx, template, variables, inject_dom);
+
+    let mut buffer = vec![];
+
+    serialize(&mut buffer, &dom.document, Default::default())
+        .ok()
+        .expect("serialization failed");
+
+    return String::from_utf8(buffer).unwrap();
+}
+
+pub fn serialize_dom(dom: &RcDom) -> String {
+    let mut buffer = vec![];
+
+    serialize(&mut buffer, &dom.document, Default::default())
+        .ok()
+        .expect("serialization failed");
+
+    return String::from_utf8(buffer).unwrap();
+}
+
+pub fn render(
+    global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,
+    rt: &Runtime,
+    cx: *mut JSContext,
+    template: &mut String,
+    variables: Option<Value>,
+) -> String {
+    render_injecting(&global, rt, cx, template, variables, Rc::new(None))
+}
+
+pub fn render_recursive(path: &std::path::Path, child_dom: Rc<Option<html5ever::rcdom::RcDom>>, child: Option<&mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>>) -> String {
+    let (rt, mut cx) = init_js();
+    render_recursive_inner(&rt, cx, path, child_dom, child)
+}
+/// Perform a recursive render.
+/// Attach parent global into jsengine if it exists
+pub fn render_recursive_inner(rt: &Runtime,
+    cx: *mut JSContext,path: &std::path::Path, child_dom: Rc<Option<html5ever::rcdom::RcDom>>, child: Option<&mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>>) -> String {
+    let path_str = format!("{}", path.display());
+    debug!("{}", path.display());
+    let mut contents = std::fs::read_to_string(&path).unwrap();
+
+
+    unsafe {
+        rooted!(in(cx) let global =
+        JS_NewGlobalObject(cx, &SIMPLE_GLOBAL_CLASS, ptr::null_mut(),
+                                    OnNewGlobalHookOption::FireOnNewGlobalHook,
+                                    &CompartmentOptions::default())
+        );
+
+        let _ac = mozjs::jsapi::JSAutoCompartment::new(cx, global.get());
+        assert!(mozjs::rust::wrappers::JS_InitStandardClasses(
+            cx,
+            global.handle()
+        ));
+
+        if let Some(mut child) = child {
+            let result_name = std::ffi::CString::new("child").unwrap();
+            let result_name_ptr = result_name.as_ptr() as *const i8;
+            rooted!(in(cx) let val = mozjs::jsval::ObjectValue(child.get()));
+            mozjs::rust::wrappers::JS_SetProperty(
+                cx,
+                global.handle(),
+                result_name_ptr,
+                val.handle()
+            );
+        }
+
+        if path_str.ends_with(".md") {
+            let mut result = render::render_markdown(&contents);
+            let mut partial =
+                render_dom(&global, &rt, cx, &mut result, None, std::rc::Rc::new(None));
+
+            let c_str = std::ffi::CString::new("layout").unwrap();
+            let ptr = c_str.as_ptr() as *const i8;
+            rooted!(in(cx) let mut layout_result = UndefinedValue());
+            mozjs::rust::wrappers::JS_GetProperty(
+                cx,
+                global.handle(),
+                ptr,
+                layout_result.handle_mut(),
+            );
+            debug!("layout -> {}", stringify_jsvalue(cx, &layout_result));
+
+            // if child_dom.is_some() {
+            //     let mut output = render_injecting(
+            //         &global,
+            //         &rt,
+            //         cx,
+            //         &mut child_dom.unwrap(),
+            //         None,
+            //         std::rc::Rc::new(Some(partial)),
+            //     );
+            // }
+            if layout_result.is_string() {
+                return render_recursive_inner(&rt, cx, &std::path::Path::new(&stringify_jsvalue(cx, &layout_result)), Rc::new(Some(partial)), Some(&global));
+            } else {
+                return serialize_dom(&partial);
+            }
+            // let mut layout_contents =
+            //     std::fs::read_to_string(&std::path::Path::new("./layout.html")).unwrap();
+            // let mut output = render_injecting(
+            //     &global,
+            //     &rt,
+            //     cx,
+            //     &mut layout_contents,
+            //     None,
+            //     std::rc::Rc::new(Some(partial)),
+            // );
+
+            // return output;
+        } else if path_str.ends_with(".html") || path_str.ends_with(".htm") {
+            let output = render(&global, &rt, cx, &mut contents, None);
+            return output;
+        } else {
+            panic!("no way to parse file.");
+        }
     }
 }

@@ -1,6 +1,6 @@
 use std::io::{self, Read};
 extern crate docgen;
-use clap::{Arg, App, SubCommand};
+use clap::{App, Arg, SubCommand};
 use glob::glob;
 mod frontmatter;
 mod render;
@@ -12,50 +12,39 @@ fn main() -> io::Result<()> {
     env_logger::init();
 
     let matches = App::new("My Super Program")
-    .version(env!("CARGO_PKG_VERSION"))
-    .author(env!("CARGO_PKG_AUTHORS"))
-    .about(env!("CARGO_PKG_DESCRIPTION"))
-    .arg(Arg::with_name("v")
-        .short("v")
-        .multiple(true)
-        .help("Sets the level of verbosity"))
-    .arg(Arg::with_name("input")
-        .short("i")
-        .default_value("./**/{*.html,*.htm,*.md}")
-        .help("print debug information verbosely"))
-    .get_matches();
-
+        .version(env!("CARGO_PKG_VERSION"))
+        .author(env!("CARGO_PKG_AUTHORS"))
+        .about(env!("CARGO_PKG_DESCRIPTION"))
+        .arg(
+            Arg::with_name("v")
+                .short("v")
+                .multiple(true)
+                .help("Sets the level of verbosity"),
+        )
+        .arg(
+            Arg::with_name("input")
+                .short("i")
+                .default_value("./**/{*.html,*.htm,*.md}")
+                .help("print debug information verbosely"),
+        )
+        .get_matches();
 
     let pattern = matches.value_of("input").unwrap();
     debug!("got pattern: {}", pattern);
     for entry in glob(pattern).expect("Failed to read input glob pattern") {
         match entry {
             Ok(path) => {
-                let path_str = format!("{}", path.display());
-                debug!("{}", path.display());
-                let mut contents = std::fs::read_to_string(&path).unwrap();
-
-                if path_str.ends_with(".md") {
-                    let mut result = render::render_markdown(&contents);
-                    let output = docgen::render(&mut result, None);
-                    println!("{}", output);
-                } else if path_str.ends_with(".html") || path_str.ends_with(".htm"){
-                    let output = docgen::render(&mut contents, None);
-                    println!("{}", output);
-                } else {
-                    error!("no way to parse file.");
-                }
-                break
-            },
+                let res = docgen::render_recursive(&path, std::rc::Rc::new(None), None);
+                println!("{}", res);
+                break;
+            }
             Err(e) => error!("{:?}", e),
         }
     }
 
-
-
     // let mut buffer = String::new();
     // io::stdin().read_to_string(&mut buffer)?;
-    
+
     // println!(
     //     "{}",
     //     docgen::render(

@@ -1,5 +1,5 @@
 <script static>
-layout = 'post.html'
+layout = './layout.html'
 title = 'Visualizing Algorithms'
 date = '2018-02-12 8:00:00 -0400'
 categories = ["notes", "javascript"]
@@ -7,6 +7,10 @@ description = "Using some custom code to generate interesting graphs of algorith
 image = "/img/sha/preview.png"
 permalink = "/2018/02/12/visualizing-algorithms"
 </script>
+
+- [x] something
+- [ ] something else
+- [X] foo
 
 ## Introduction
 
