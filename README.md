@@ -6,7 +6,7 @@ Docgen is a static site renderer which is built using servo's html5ever and spid
 
 Docgen's template syntax is based on / inspired by the syntax used by vuejs's templates. the rationale behind this is that all templates become are normal HTML pages and do not need extra text nodes containing the conditional / template logic. (like liquid, mustache, others..). This means pages can be developed and tested in their pure template form, without needing much (or any) tooling to do so in a nice way.
 
-Templates also allow <script> tags to be run (At compile time) with the `ssr="true"` attribute set.
+Templates also allow <script> tags to be run (At compile time) with the `static` attribute set.
   
 Please note that the generation does **NOT** currently expose the normal javascript dom api, such as `document.createElement`, etc. It is an empty javascript context only used for templating. If this feature would be useful to you, file an issue with use cases / info.
 
