@@ -50,7 +50,7 @@ At the moment, docgen only produces processes html templates. This will change i
 ```html
 <html>
 <head>
-  <script ssr="true">
+  <script static>
   x = 1337;
   let SECRET_ENABLED = true;
   let links = [{
