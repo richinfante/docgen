@@ -37,6 +37,12 @@ We currently read input templates from stdin.
 cat demo.html | cargo run
 ```
 
+## Process
+1. render the page to html if it's markdown.
+2. render using the main `docgen` process, in a top-down manner.
+  - evaluate any `script static` tags.
+  - replace all template variables
+
 ## Template Examples
 At the moment, docgen only produces processes html templates. This will change in the future, with options for markdown, etc.
 

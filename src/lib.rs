@@ -292,7 +292,7 @@ unsafe fn render_children(
             // debug!("element name: {:?}", name);
 
             if name.local.to_string() == "script" {
-                if get_attribute(&node, "ssr") == Some("true".to_string()) {
+                if get_attribute(&node, "static").is_some() {
                     let script = inner_text(node);
                     eval_in_engine(&global, &rt, cx, &script);
                 }
@@ -534,7 +534,7 @@ unsafe fn render_children(
 }
 
 /// Render a template.
-pub fn render(template: &mut String, variables: Value) -> String {
+pub fn render(template: &mut String, variables: Option<Value>) -> String {
     let engine = JSEngine::init().unwrap();
     let rt = Runtime::new(engine);
     let cx = rt.cx();
