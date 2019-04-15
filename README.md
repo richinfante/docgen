@@ -51,8 +51,6 @@ At the moment, docgen only produces processes html templates. This will change i
 <html>
 <head>
   <script static>
-  x = 1337;
-  let SECRET_ENABLED = true;
   let links = [{
     href: 'https://google.com',
     title: 'google'
