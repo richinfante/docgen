@@ -31,14 +31,15 @@ fn main() -> io::Result<()> {
     for entry in glob(pattern).expect("Failed to read input glob pattern") {
         match entry {
             Ok(path) => {
+                let path_str = format!("{}", path.display());
                 debug!("{}", path.display());
                 let mut contents = std::fs::read_to_string(&path).unwrap();
 
-                if path.ends_with(".md") {
+                if path_str.ends_with(".md") {
                     let mut result = render::render_markdown(&contents);
                     let output = docgen::render(&mut result, None);
                     println!("{}", output);
-                } else if path.ends_with(".html") || path.ends_with(".htm"){
+                } else if path_str.ends_with(".html") || path_str.ends_with(".htm"){
                     let output = docgen::render(&mut contents, None);
                     println!("{}", output);
                 } else {
