@@ -7,7 +7,7 @@ Docgen is a static site renderer which is built using servo's html5ever and spid
 Docgen's template syntax is based on / inspired by the syntax used by vuejs's templates. the rationale behind this is that all templates become are normal HTML pages and do not need extra text nodes containing the conditional / template logic. (like liquid, mustache, others..). This means pages can be developed and tested in their pure template form, without needing much (or any) tooling to do so in a nice way.
 
 Templates also allow <script> tags to be run (At compile time) with the `static` attribute set.
-  
+
 Please note that the generation does **NOT** currently expose the normal javascript dom api, such as `document.createElement`, etc. It is an empty javascript context only used for templating. If this feature would be useful to you, file an issue with use cases / info.
 
 ## Feature Roadmap
@@ -17,7 +17,7 @@ these are features I'd like to have initially, in no particular order.
 - [x] conditional logic with `x-if` (tentative name)
 - [x] attribute variable expansion (`:href="link.title"` with `link = { title: 'HI' }` -> `href="HI"`)
 - [x] layout includes via `layout` js variable and `x-content-slot` attribute.
-- [ ] iteration logic with `x-each` (tentative name) **Experimentally Implemented**
+- [x] iteration logic with `x-each` (tentative name) **Experimentally Implemented**
 - [ ] conditional css class generation (similar to vuejs's :class attribute).
 - [ ] html partials via `<template src="" />` tag.
 - [ ] way to extract the contents of a div to replace it. Potentially called `x-extract`
@@ -67,10 +67,8 @@ At the moment, docgen only produces processes html templates. This will change i
 </head>
 <body>
   <ul>
-    <!-- TODO: allow binding to different variables. -->
-    <!-- Currently, only binds to "item" which makes nesting not work -->
-    <li x-each="links">
-      <a :href="item.href">{{item.title}}</a>
+    <li x-each="links" x-as="link">
+      <a :href="link.href">{{link.title}}</a>
     </li>
   </ul>
 </body>
@@ -91,7 +89,7 @@ At the moment, docgen only produces processes html templates. This will change i
     </li><li>
       <a href="https://amazon.com">amazon</a>
     </li>
-  </ul> 
+  </ul>
 </body>
 </html>
 ```
@@ -133,7 +131,7 @@ note: for loops are not feature complete. All for loops currently bind to `item`
 
 ```html
 <ul>
-  <li x-for="items">
+  <li x-for="items" x-as="item">
     <a :href="item.url">{{item.title}}</a>
   </li>
 </ul>

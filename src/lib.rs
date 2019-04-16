@@ -293,6 +293,8 @@ fn deep_clone(old_node: &Rc<Node>, parent: Option<Weak<Node>>) -> Rc<Node> {
     node
 }
 
+use mozjs::conversions::{ToJSValConvertible, FromJSValConvertible};
+
 /// Render the children of a node, recursively.
 unsafe fn render_children(
     global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,
@@ -333,6 +335,8 @@ unsafe fn render_children(
             let mut replacements: Vec<Rc<Node>> = vec![];
             let mut needs_remove: bool = false;
             let mut final_attrs: Vec<html5ever::interface::Attribute> = vec![];
+            let loop_name = get_attribute(node, "x-as").unwrap_or("item".to_string());
+            let index_name = get_attribute(node, "x-index").unwrap_or("i".to_string());
 
             {
                 let mut attributes: RefMut<Vec<html5ever::interface::Attribute>> =
@@ -343,9 +347,33 @@ unsafe fn render_children(
                     let name = &attr.name.local.to_string();
                     let script = String::from(&attr.value);
                     if name.starts_with(":") {
-                        attr.name = QualName::new(None, "".into(), name[1..].to_string().into());
-                        attr.value = eval_in_engine(&global, &rt, cx, &script).into();
+                        let final_name = name[1..].to_string();
+                        attr.name = QualName::new(None, "".into(), final_name.into());
+                        // if final_name == "class" {
+                        let value : JSVal = eval(&global, &rt, cx, &script).unwrap();
+                        // if value.is_string() || value.is_number() || value.is_boolean() {
+                        attr.value = stringify_jsvalue(cx, &value).into();
+                            // } else if value.is_object() {
+                            //     rooted!(in(cx) let mut entries = UndefinedValue());
+                            //
+                            //     let next_str = std::ffi::CString::new("next").unwrap();
+                            //     let next_ptr = next_str.as_ptr() as *const i8;
+                            //     let args = mozjs::jsapi::HandleValueArray::new();
+                            //     rooted!(in(cx) let mut iteration_value = UndefinedValue());
+                            //     mozjs::rust::wrappers::JS_CallFunctionName(
+                            //         cx,
+                            //         iter_result.handle(),
+                            //         next_ptr,
+                            //         &args,
+                            //         iteration_value.handle_mut(),
+                            //     );
+                            // }
+
                         final_attrs.push(attr.clone());
+                        // } else {
+                        //     attr.value = eval_in_engine(&global, &rt, cx, &script).into();
+                        //     final_attrs.push(attr.clone());
+                        // }
                     } else if name == "x-if" {
                         let included = eval_in_engine_bool(&global, &rt, cx, &script);
                         if !included {
@@ -367,6 +395,8 @@ unsafe fn render_children(
                             let body_children = &body.children;
                             node.children.swap(&body_children);
                         }
+                    } else if name == "x-as" || name == "x-index" {
+                        // Do nothing.
                     } else {
                         final_attrs.push(attr.clone());
                     }
@@ -412,6 +442,8 @@ unsafe fn render_children(
                         &args,
                         iterret.handle_mut(),
                     );
+
+                    let mut loop_index : u64 = 0;
 
                     loop {
                         needs_remove = true;
@@ -477,7 +509,7 @@ unsafe fn render_children(
 
                         // HACK: Store the value temporarily in the global scope.
                         // TODO: iterate and create new scopes with the values.
-                        let result_name = std::ffi::CString::new("item").unwrap();
+                        let result_name = std::ffi::CString::new(loop_name.clone()).unwrap();
                         let result_name_ptr = result_name.as_ptr() as *const i8;
                         rooted!(in(cx) let iter_val = iteration_result_value.clone());
                         mozjs::rust::wrappers::JS_SetProperty(
@@ -485,6 +517,17 @@ unsafe fn render_children(
                             global.handle(),
                             result_name_ptr,
                             iter_val.handle(),
+                        );
+
+                        let index_name_str = std::ffi::CString::new(index_name.clone()).unwrap();
+                        let index_name_ptr = index_name_str.as_ptr() as *const i8;
+                        rooted!(in(cx) let mut index = UndefinedValue());
+                        loop_index.to_jsval(cx, index.handle_mut());
+                        mozjs::rust::wrappers::JS_SetProperty(
+                            cx,
+                            global.handle(),
+                            index_name_ptr,
+                            index.handle(),
                         );
 
                         // Mut and render
@@ -506,6 +549,9 @@ unsafe fn render_children(
                             slot_contents.clone(),
                         );
                         replacements.push(expand_node);
+
+                        // Increment iteration counter.
+                        loop_index += 1;
                     }
                 }
             }

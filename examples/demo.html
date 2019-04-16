@@ -43,6 +43,7 @@
 
   <link rel="stylesheet" href="/css/style.css" inline>
   <script static>
+  let DEBUG = true;
   let links = [{
     href: 'https://google.com',
     title: 'google'
@@ -57,10 +58,14 @@
 </head>
 <body>
   <ul>
-    <li x-each="links">
-      <a :href="item.href">{{item.title}}</a>
+    <li x-each="links" x-as="link">
+      <a :href="link.href">{{link.title}}</a>
     </li>
   </ul>
+
+  <div x-each="[44,55,66,77]" x-as="number" x-index="index">
+    #{{index}}: {{number}}
+  </div>
 
   <div x-if="DEBUG">
     <div><b>Built at:</b> {{new Date().toLocaleString()}}</div>
