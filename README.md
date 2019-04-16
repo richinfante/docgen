@@ -34,9 +34,8 @@ cargo build
 ```
 
 ## Runing example
-We currently read input templates from stdin.
 ```bash
-cat demo.html | cargo run
+cargo run -- -i examples/demo.html
 ```
 
 ## Process
