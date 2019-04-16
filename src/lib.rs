@@ -98,7 +98,13 @@ pub fn eval_in_engine(
 ) -> String {
     unsafe {
         rooted!(in(cx) let mut rval = UndefinedValue());
-        rt.evaluate_script(global.handle(), contents, "docgen", 1, rval.handle_mut());
+        rt.evaluate_script(
+            global.handle(),
+            contents,
+            "docgen_eval_string",
+            1,
+            rval.handle_mut(),
+        );
         return stringify_jsvalue(cx, &rval);
     }
 }
@@ -111,7 +117,13 @@ pub fn eval(
 ) -> Result<JSVal, ()> {
     unsafe {
         rooted!(in(cx) let mut rval = UndefinedValue());
-        rt.evaluate_script(global.handle(), contents, "docgen", 1, rval.handle_mut());
+        rt.evaluate_script(
+            global.handle(),
+            contents,
+            "docgen_eval",
+            1,
+            rval.handle_mut(),
+        );
 
         return Ok(rval.clone());
     }
@@ -125,7 +137,17 @@ pub fn eval_in_engine_bool(
 ) -> bool {
     unsafe {
         rooted!(in(cx) let mut rval = UndefinedValue());
-        rt.evaluate_script(global.handle(), contents, "docgen", 1, rval.handle_mut());
+        let res = rt.evaluate_script(
+            global.handle(),
+            contents,
+            "docgen_eval_bool",
+            1,
+            rval.handle_mut(),
+        );
+        if !res.is_ok() {
+            return false;
+        }
+
         return boolify_jsvalue(cx, &rval);
     }
 }
@@ -151,11 +173,11 @@ impl CondGenFlags {
 pub fn inner_text(node: &Rc<Node>) -> String {
     match node.data.borrow() {
         NodeData::Text { contents } => {
-            let mut tendril = contents.borrow();
+            let tendril = contents.borrow();
             format!("{}", tendril)
         }
         _ => {
-            let mut children = node.children.borrow();
+            let children = node.children.borrow();
 
             let mut string = String::new();
 
@@ -280,7 +302,7 @@ unsafe fn render_children(
     loop_expansion: bool,
     slot_contents: Rc<Option<html5ever::rcdom::RcDom>>,
 ) -> CondGenFlags {
-    let mut flags = CondGenFlags::default();
+    let flags = CondGenFlags::default();
 
     match node.data.borrow() {
         NodeData::Document { .. } => {
@@ -360,7 +382,7 @@ unsafe fn render_children(
                     let object = eval(&global, &rt, cx, &script).unwrap();
 
                     // 1. Symbol.Iterator
-                    let mut sym = mozjs::jsapi::GetWellKnownSymbol(cx, jsapi::SymbolCode::iterator);
+                    let sym = mozjs::jsapi::GetWellKnownSymbol(cx, jsapi::SymbolCode::iterator);
                     let id = mozjs::glue::RUST_SYMBOL_TO_JSID(sym);
 
                     if !object.is_object() {
@@ -395,7 +417,7 @@ unsafe fn render_children(
                         needs_remove = true;
                         debug!("iterating thing...");
                         // 4. Call the iterator.next() function
-                        rooted!(in(cx) let mut returnvalue = UndefinedValue());
+                        rooted!(in(cx) let returnvalue = UndefinedValue());
                         rooted!(in(cx) let iter_result = iterret.to_object());
                         let next_str = std::ffi::CString::new("next").unwrap();
                         let next_ptr = next_str.as_ptr() as *const i8;
@@ -431,7 +453,7 @@ unsafe fn render_children(
 
                         // debug!("iter value -> {}", stringify_jsvalue(cx, &iteration_result_value));
 
-                        /// 6. Check if iterator is done
+                        // 6. Check if iterator is done
                         let done_str = std::ffi::CString::new("done").unwrap();
                         let done_str_ptr = done_str.as_ptr() as *const i8;
                         rooted!(in(cx) let iteration_value_obj = iteration_value.to_object());
@@ -561,14 +583,14 @@ pub fn render_dom(
     rt: &Runtime,
     cx: *mut JSContext,
     template: &mut String,
-    variables: Option<Value>,
+    _variables: Option<Value>,
     slot_contents: Rc<Option<html5ever::rcdom::RcDom>>,
 ) -> html5ever::rcdom::RcDom {
     unsafe {
         // NOTE: this line is important, without it all JS_ calls seem to segfault.
 
         let spidermonkey_version = mozjs::jsapi::JS_GetImplementationVersion();
-        let spidermonkey_version_c_str: &CStr = unsafe { CStr::from_ptr(spidermonkey_version) };
+        let spidermonkey_version_c_str: &CStr = CStr::from_ptr(spidermonkey_version);
         let spidermonkey_version_str_slice: &str = spidermonkey_version_c_str.to_str().unwrap();
 
         // TODO: this is bad code.
@@ -590,20 +612,6 @@ pub fn render_dom(
             ),
         );
 
-        let empty_args: mozjs::jsapi::HandleValueArray = mozjs::jsapi::HandleValueArray::new();
-        // let rp = &empty_args as *const mozjs::jsapi::HandleValueArray;
-        // debug!("{:?} {:?}", empty_args, rp);
-
-        // debug!("rooting undefined.");
-        // rooted!(in(cx) let mut iterret = UndefinedValue());
-        // let c_str = std::ffi::CString::new("fn1").unwrap();
-        // let ptr = c_str.as_ptr() as *const i8;
-        // debug!("creating thing: {:?}", ptr);
-
-        // // mozjs::rust::wrappers::JS_GetProperty(cx, global.handle(), ptr, iterret.handle_mut());
-        // mozjs::rust::jsapi_wrapped::JS_CallFunctionName(cx, global.handle(), ptr, &empty_args, &mut iterret.handle_mut());
-        // debug!("Stringified: {}", stringify_jsvalue(cx, &iterret));
-        // debug!("Done!");
         let opts = ParseOpts {
             tree_builder: TreeBuilderOpts {
                 drop_doctype: false,
@@ -612,7 +620,6 @@ pub fn render_dom(
             ..Default::default()
         };
 
-        // let stdin = io::stdin();
         let dom = parse_document(RcDom::default(), opts)
             .from_utf8()
             .read_from(&mut template.as_bytes())
@@ -676,18 +683,26 @@ pub fn render(
     render_injecting(&global, rt, cx, template, variables, Rc::new(None))
 }
 
-pub fn render_recursive(path: &std::path::Path, child_dom: Rc<Option<html5ever::rcdom::RcDom>>, child: Option<&mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>>) -> String {
-    let (rt, mut cx) = init_js();
+pub fn render_recursive(
+    path: &std::path::Path,
+    child_dom: Rc<Option<html5ever::rcdom::RcDom>>,
+    child: Option<&mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>>,
+) -> String {
+    let (rt, cx) = init_js();
     render_recursive_inner(&rt, cx, path, child_dom, child)
 }
 /// Perform a recursive render.
 /// Attach parent global into jsengine if it exists
-pub fn render_recursive_inner(rt: &Runtime,
-    cx: *mut JSContext,path: &std::path::Path, child_dom: Rc<Option<html5ever::rcdom::RcDom>>, child: Option<&mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>>) -> String {
+pub fn render_recursive_inner(
+    rt: &Runtime,
+    cx: *mut JSContext,
+    path: &std::path::Path,
+    child_dom: Rc<Option<html5ever::rcdom::RcDom>>,
+    child: Option<&mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>>,
+) -> String {
     let path_str = format!("{}", path.display());
     debug!("{}", path.display());
     let mut contents = std::fs::read_to_string(&path).unwrap();
-
 
     unsafe {
         rooted!(in(cx) let global =
@@ -702,7 +717,7 @@ pub fn render_recursive_inner(rt: &Runtime,
             global.handle()
         ));
 
-        if let Some(mut child) = child {
+        if let Some(child) = child {
             let result_name = std::ffi::CString::new("child").unwrap();
             let result_name_ptr = result_name.as_ptr() as *const i8;
             rooted!(in(cx) let val = mozjs::jsval::ObjectValue(child.get()));
@@ -710,14 +725,13 @@ pub fn render_recursive_inner(rt: &Runtime,
                 cx,
                 global.handle(),
                 result_name_ptr,
-                val.handle()
+                val.handle(),
             );
         }
 
         if path_str.ends_with(".md") {
             let mut result = render::render_markdown(&contents);
-            let mut partial =
-                render_dom(&global, &rt, cx, &mut result, None, child_dom);
+            let partial = render_dom(&global, &rt, cx, &mut result, None, child_dom);
 
             let c_str = std::ffi::CString::new("layout").unwrap();
             let ptr = c_str.as_ptr() as *const i8;
@@ -731,11 +745,16 @@ pub fn render_recursive_inner(rt: &Runtime,
             debug!("layout -> {}", stringify_jsvalue(cx, &layout_result));
 
             if layout_result.is_string() {
-                return render_recursive_inner(&rt, cx, &std::path::Path::new(&stringify_jsvalue(cx, &layout_result)), Rc::new(Some(partial)), Some(&global));
+                return render_recursive_inner(
+                    &rt,
+                    cx,
+                    &std::path::Path::new(&stringify_jsvalue(cx, &layout_result)),
+                    Rc::new(Some(partial)),
+                    Some(&global),
+                );
             } else {
                 return serialize_dom(&partial);
             }
-
         } else if path_str.ends_with(".html") || path_str.ends_with(".htm") {
             // let output = render(&global, &rt, cx, &mut contents, None);
             let output = render_injecting(&global, &rt, cx, &mut contents, None, child_dom);
