@@ -1,5 +1,5 @@
 <script static>
-layout = './layout.html'
+layout = './examples/layout.html'
 title = 'Visualizing Algorithms'
 date = '2018-02-12 8:00:00 -0400'
 categories = ["notes", "javascript"]
@@ -60,7 +60,7 @@ class OpBitFullAdder {
 
 The "output" property on each of my classes was essentially a reference to an array of the bits that the operation outputted. These bits would, in turn, reference the bits and operations inside of the operation it'self and the flow out to the inputs.
 
-```js 
+```js
 // Sha256 Sigma0 Operation
 module.exports.Sigma0 = function Sigma0 (input) {
   var rot2 = new OpRotateRight(input, 2)
@@ -120,7 +120,7 @@ Here's a selection of some of the generated visualizations. Originally, I attemp
 </div>
 
 ## Next steps
- 
+
 These outputs seem promising for both analysis of complexity and the fact that they just look cool. In the future, I may want to take this a step further and explore generating these from a compiled C (or any) program, and porting the library to other languages. I'd expect that this sort of tracking would incur both memory and runtime penalties that are a constant proportion of the existing program's existing time complexity. However, that approach may be a very time-consuming process and it might be easier if access to the source code is available to perform a c-macro style replacement instead. This may not be applicable to algorithms outside the "math" space at its current stage, but theoretically, it can be used to analyze things like databases, application networking, and other things like complexity analysis.
 
 If you found this interesting, feel free to follow me on twitter <a href="https://twitter.com/richinfante">@richinfante</a>, and let me know if you have any comments, corrections, or thoughts!
