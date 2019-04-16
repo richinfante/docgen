@@ -2,16 +2,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="ie=edge">
-  <title>Document</title>
+  <title>Visualizing Algorithms - Rich Infante</title>
 </head>
 <body>
-  <div><html><head>
-</head><body><ul>
-<li><input type="checkbox" disabled="" checked=""> something</li>
-<li><input type="checkbox" disabled=""> something else</li>
-<li><input type="checkbox" disabled="" checked=""> foo</li>
-</ul>
-<h2><a href="#introduction" aria-hidden="true" class="anchor" id="h-introduction"></a>Introduction</h2>
+  <header>
+    <h1>Header Contents</h1>
+  </header>
+  <main><h2><a href="#introduction" aria-hidden="true" class="anchor" id="h-introduction"></a>Introduction</h2>
 <h1>Visualizing Algorithms (/2018/02/12/visualizing-algorithms)</h1>
 I recently  <a href="https://twitter.com/richinfante/status/959984976090619904">shared this on twitter</a>, and wanted to share a bit more about how I did it:
 <blockquote class="twitter-tweet" data-lang="en"><p lang="en" dir="ltr">Different portions of the sha-256 algorithm (two rounds), visualized bit-by-bit as a directed graph (first ~30k, ~100k nodes, last ~100k nodes). A result of one of my recent experiments! <a href="https://t.co/cK2dLj9haT">pic.twitter.com/cK2dLj9haT</a></p>— <a href="https://twitter.com/richinfante/status/959984976090619904">Rich Infante (@richinfante) February 4, 2018</a></blockquote>
@@ -99,6 +96,12 @@ module.exports.Sigma0 = function Sigma0 (input) {
 <h2><a href="#next-steps" aria-hidden="true" class="anchor" id="h-next-steps"></a>Next steps</h2>
 <p>These outputs seem promising for both analysis of complexity and the fact that they just look cool. In the future, I may want to take this a step further and explore generating these from a compiled C (or any) program, and porting the library to other languages. I’d expect that this sort of tracking would incur both memory and runtime penalties that are a constant proportion of the existing program’s existing time complexity. However, that approach may be a very time-consuming process and it might be easier if access to the source code is available to perform a c-macro style replacement instead. This may not be applicable to algorithms outside the “math” space at its current stage, but theoretically, it can be used to analyze things like databases, application networking, and other things like complexity analysis.</p>
 <p>If you found this interesting, feel free to follow me on twitter <a href="https://twitter.com/richinfante">@richinfante</a>, and let me know if you have any comments, corrections, or thoughts!</p>
-</body></html></div>
+</main>
+  <footer>
+    <p>© 2015-2019 Rich Infante. All Rights Reserved.</p>
+    <p>Built at: 15/04/2019, 22:27:35</p>
+    <p>0.1.0 / JavaScript-C60.0.3</p>
+  </footer>
+
 
 </body></html>

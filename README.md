@@ -16,6 +16,7 @@ these are features I'd like to have initially, in no particular order.
 - [x] add js engine
 - [x] conditional logic with `x-if` (tentative name)
 - [x] attribute variable expansion (`:href="link.title"` with `link = { title: 'HI' }` -> `href="HI"`)
+- [x] layout includes via `layout` js variable and `x-content-slot` attribute.
 - [ ] iteration logic with `x-each` (tentative name) **Experimentally Implemented**
 - [ ] conditional css class generation (similar to vuejs's :class attribute).
 - [ ] html partials via `<template src="" />` tag.

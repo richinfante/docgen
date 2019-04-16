@@ -8,10 +8,6 @@ image = "/img/sha/preview.png"
 permalink = "/2018/02/12/visualizing-algorithms"
 </script>
 
-- [x] something
-- [ ] something else
-- [X] foo
-
 ## Introduction
 
 <h1>{{title}} ({{permalink}})</h1>

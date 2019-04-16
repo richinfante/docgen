@@ -7,6 +7,14 @@
   <title>{{child.title}} - Rich Infante</title>
 </head>
 <body>
-  <div x-content-slot></div>
+  <header>
+    <h1>Header Contents</h1>
+  </header>
+  <main x-content-slot></main>
+  <footer>
+    <p>&copy; 2015-2019 Rich Infante. All Rights Reserved.</p>
+    <p>Built at: {{new Date().toLocaleString()}}</p>
+    <p>{{docgen.version}} / {{docgen.spidermonkey_version}}</p>
+  </footer>
 </body>
 </html>
