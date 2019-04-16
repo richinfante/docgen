@@ -717,7 +717,7 @@ pub fn render_recursive_inner(rt: &Runtime,
         if path_str.ends_with(".md") {
             let mut result = render::render_markdown(&contents);
             let mut partial =
-                render_dom(&global, &rt, cx, &mut result, None, std::rc::Rc::new(None));
+                render_dom(&global, &rt, cx, &mut result, None, child_dom);
 
             let c_str = std::ffi::CString::new("layout").unwrap();
             let ptr = c_str.as_ptr() as *const i8;
@@ -730,35 +730,15 @@ pub fn render_recursive_inner(rt: &Runtime,
             );
             debug!("layout -> {}", stringify_jsvalue(cx, &layout_result));
 
-            // if child_dom.is_some() {
-            //     let mut output = render_injecting(
-            //         &global,
-            //         &rt,
-            //         cx,
-            //         &mut child_dom.unwrap(),
-            //         None,
-            //         std::rc::Rc::new(Some(partial)),
-            //     );
-            // }
             if layout_result.is_string() {
                 return render_recursive_inner(&rt, cx, &std::path::Path::new(&stringify_jsvalue(cx, &layout_result)), Rc::new(Some(partial)), Some(&global));
             } else {
                 return serialize_dom(&partial);
             }
-            // let mut layout_contents =
-            //     std::fs::read_to_string(&std::path::Path::new("./layout.html")).unwrap();
-            // let mut output = render_injecting(
-            //     &global,
-            //     &rt,
-            //     cx,
-            //     &mut layout_contents,
-            //     None,
-            //     std::rc::Rc::new(Some(partial)),
-            // );
 
-            // return output;
         } else if path_str.ends_with(".html") || path_str.ends_with(".htm") {
-            let output = render(&global, &rt, cx, &mut contents, None);
+            // let output = render(&global, &rt, cx, &mut contents, None);
+            let output = render_injecting(&global, &rt, cx, &mut contents, None, child_dom);
             return output;
         } else {
             panic!("no way to parse file.");
