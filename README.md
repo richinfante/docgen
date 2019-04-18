@@ -34,9 +34,8 @@ cargo build
 ```
 
 ## Runing example
-We currently read input templates from stdin.
 ```bash
-cat demo.html | cargo run
+cargo run -- -i examples/demo.html
 ```
 
 ## Process
@@ -111,7 +110,8 @@ At the moment, docgen only produces processes html templates. This will change i
 <span class="{{className}}">Test</span>
 ```
 
-Note: the `:class` binding *may* be updated in the future to allow a dictionary, which in turn renders to a space-separated class string based on all the keys that have truthy values.
+Note: the `:class` binding *may* be updated in the future to allow a dictionary, which in turn renders to a space-separated class string based on all the keys that have truthy values. (equivalent to: `Object.entries(classDict).filter(el => el[1]).map(el => el[0]).join(' ')`)
+
 ```html
 <span :class="className">Test</span>
 ```
