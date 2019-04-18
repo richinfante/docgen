@@ -293,7 +293,7 @@ fn deep_clone(old_node: &Rc<Node>, parent: Option<Weak<Node>>) -> Rc<Node> {
     node
 }
 
-use mozjs::conversions::{ToJSValConvertible, FromJSValConvertible};
+use mozjs::conversions::{FromJSValConvertible, ToJSValConvertible};
 
 /// Render the children of a node, recursively.
 unsafe fn render_children(
@@ -350,30 +350,30 @@ unsafe fn render_children(
                         let final_name = name[1..].to_string();
                         attr.name = QualName::new(None, "".into(), final_name.into());
                         // if final_name == "class" {
-                        let value : JSVal = eval(&global, &rt, cx, &script).unwrap();
+                        let value: JSVal = eval(&global, &rt, cx, &script).unwrap();
                         // if value.is_string() || value.is_number() || value.is_boolean() {
                         attr.value = stringify_jsvalue(cx, &value).into();
-                            // } else if value.is_object() {
-                            //     rooted!(in(cx) let mut entries = UndefinedValue());
-                            //
-                            //     let next_str = std::ffi::CString::new("next").unwrap();
-                            //     let next_ptr = next_str.as_ptr() as *const i8;
-                            //     let args = mozjs::jsapi::HandleValueArray::new();
-                            //     rooted!(in(cx) let mut iteration_value = UndefinedValue());
-                            //     mozjs::rust::wrappers::JS_CallFunctionName(
-                            //         cx,
-                            //         iter_result.handle(),
-                            //         next_ptr,
-                            //         &args,
-                            //         iteration_value.handle_mut(),
-                            //     );
-                            // }
+                        // } else if value.is_object() {
+                        //     rooted!(in(cx) let mut entries = UndefinedValue());
+                        //
+                        //     let next_str = std::ffi::CString::new("next").unwrap();
+                        //     let next_ptr = next_str.as_ptr() as *const i8;
+                        //     let args = mozjs::jsapi::HandleValueArray::new();
+                        //     rooted!(in(cx) let mut iteration_value = UndefinedValue());
+                        //     mozjs::rust::wrappers::JS_CallFunctionName(
+                        //         cx,
+                        //         iter_result.handle(),
+                        //         next_ptr,
+                        //         &args,
+                        //         iteration_value.handle_mut(),
+                        //     );
+                        // }
 
                         final_attrs.push(attr.clone());
-                        // } else {
-                        //     attr.value = eval_in_engine(&global, &rt, cx, &script).into();
-                        //     final_attrs.push(attr.clone());
-                        // }
+                    // } else {
+                    //     attr.value = eval_in_engine(&global, &rt, cx, &script).into();
+                    //     final_attrs.push(attr.clone());
+                    // }
                     } else if name == "x-if" {
                         let included = eval_in_engine_bool(&global, &rt, cx, &script);
                         if !included {
@@ -391,13 +391,13 @@ unsafe fn render_children(
                             let children: Ref<Vec<Rc<Node>>> = doc.children.borrow();
                             debug!("got {} childen to doc", children.len());
                             if children.len() == 0 {
-                                continue
+                                continue;
                             }
                             let html: &Node = children[children.len() - 1].borrow();
                             let html_children = html.children.borrow();
                             debug!("got {} childen to html", html_children.len());
                             if html_children.len() == 0 {
-                                continue
+                                continue;
                             }
                             let body: &Node = html_children[html_children.len() - 1].borrow();
                             let body_children = &body.children;
@@ -451,7 +451,7 @@ unsafe fn render_children(
                         iterret.handle_mut(),
                     );
 
-                    let mut loop_index : u64 = 0;
+                    let mut loop_index: u64 = 0;
 
                     loop {
                         needs_remove = true;

@@ -136,3 +136,35 @@ note: for loops are not feature complete. All for loops currently bind to `item`
   </li>
 </ul>
 ```
+
+### Template Extension
+**hello.md**
+```md
+<script>
+layout = './base.html'
+title = 'Example'
+</script>
+
+# Hello, World
+```
+
+**base.html**
+```html
+<html>
+  <head>{{child.title}}</head>
+  <body>
+    <div x-content-slot></div>
+  </body>
+</html>
+```
+
+**out.html**
+```html
+<html>
+  <head>Example</head>
+  <body>
+    <h1>Hello, World</h1>
+  </body>
+</html>
+```
+
