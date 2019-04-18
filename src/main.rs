@@ -2,7 +2,6 @@ use std::io::{self, Read};
 extern crate docgen;
 use clap::{App, Arg, SubCommand};
 use glob::glob;
-mod frontmatter;
 mod render;
 
 #[macro_use]
