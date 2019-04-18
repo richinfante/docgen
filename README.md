@@ -28,7 +28,7 @@ these are features I'd like to have initially, in no particular order.
 
 ## Building from source
 ```bash
-brew install yasm
+brew install yasm autoconf
 set AUTOCONF="$(which autoconf)"
 cargo build
 ```
