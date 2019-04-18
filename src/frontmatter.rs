@@ -36,32 +36,32 @@ pub enum MatterType {
 type Alias = YAMLValue;
 
 
-trait EasyToJSVal {
+pub trait EasyToJSVal {
     unsafe fn convert_to_jsval(&self, cx: *mut JSContext) -> JSValue;
 }
 
-impl EasyToJSVal for ToJSValConvertible {
-    unsafe fn convert_to_jsval(&self, cx: *mut JSContext) -> JSValue {
-        rooted!(in(cx) let mut val = UndefinedValue());
-        self.to_jsval(cx, val.handle_mut());
-        val.get()
-    }
-}
+// impl EasyToJSVal for ToJSValConvertible {
+//     unsafe fn convert_to_jsval(&self, cx: *mut JSContext) -> JSValue {
+//         rooted!(in(cx) let mut val = UndefinedValue());
+//         self.to_jsval(cx, val.handle_mut());
+//         val.get()
+//     }
+// }
 
-impl ToJSValConvertible for EasyToJSVal {
-    unsafe fn to_jsval(&self, cx: *mut JSContext, mut rval: MutableHandleValue) {
-        let val = self.convert_to_jsval(cx);
-        rval.set(val);
-    }
-}
+// impl ToJSValConvertible for EasyToJSVal {
+//     unsafe fn to_jsval(&self, cx: *mut JSContext, mut rval: MutableHandleValue) {
+//         let val = self.convert_to_jsval(cx);
+//         rval.set(val);
+//     }
+// }
 
-impl<T: ToJSValConvertible> EasyToJSVal for &Vec<T> {
-    unsafe fn convert_to_jsval(&self, cx: *mut JSContext) -> JSValue {
-        rooted!(in(cx) let mut val = UndefinedValue());
-        self.to_jsval(cx, val.handle_mut());
-        val.get()
-    }
-}
+// impl<T: ToJSValConvertible> EasyToJSVal for &Vec<T> {
+//     unsafe fn convert_to_jsval(&self, cx: *mut JSContext) -> JSValue {
+//         rooted!(in(cx) let mut val = UndefinedValue());
+//         self.to_jsval(cx, val.handle_mut());
+//         val.get()
+//     }
+// }
 
 // impl <T: EasyToJSVal> EasyToJSVal for Vec<T> {
 //     unsafe fn convert_to_jsval(&self, cx: *mut JSContext) -> JSValue {
@@ -71,6 +71,7 @@ impl<T: ToJSValConvertible> EasyToJSVal for &Vec<T> {
 //     }
 // }
 
+/// ToJSValConvertible wrapper for YAMLValues
 impl EasyToJSVal for YAMLValue {
     unsafe fn convert_to_jsval(&self, cx: *mut JSContext) -> JSValue {
         match self {

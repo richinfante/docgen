@@ -40,6 +40,8 @@ use std::rc::Rc;
 mod frontmatter;
 mod render;
 
+use frontmatter::EasyToJSVal;
+
 /// Stringify a jsval into a rust string for injection into the template
 unsafe fn stringify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> String {
     if rval.is_number() {
@@ -831,6 +833,17 @@ pub fn render_recursive_inner(
             global.handle(),
             page_ptr,
             val.handle()
+        );
+        
+        let val : serde_yaml::Value = serde_yaml::from_str(r###"name: Example"###).unwrap();
+        let fmname = std::ffi::CString::new("frontmatter").unwrap();
+        let fmname_ptr = fmname.as_ptr() as *const i8;
+        rooted!(in(cx) let val = val.convert_to_jsval(cx));
+        mozjs::rust::wrappers::JS_SetProperty(
+            cx,
+            global.handle(),
+            fmname_ptr,
+            val.handle(),
         );
 
         if let Some(child) = child {

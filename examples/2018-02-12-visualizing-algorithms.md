@@ -8,7 +8,8 @@ page.image = "/img/sha/preview.png"
 page.permalink = "/2018/02/12/visualizing-algorithms"
 </script>
 
-## Introduction
+
+## Introduction {{frontmatter.name}}
 
 I recently  <a href="https://twitter.com/richinfante/status/959984976090619904">shared this on twitter</a>, and wanted to share a bit more about how I did it:
 
