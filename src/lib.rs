@@ -389,9 +389,17 @@ unsafe fn render_children(
                             debug!("swapping slot contents into dom tree.");
                             let doc: &Node = contents.document.borrow();
                             let children: Ref<Vec<Rc<Node>>> = doc.children.borrow();
-                            let html: &Node = children[0].borrow();
+                            debug!("got {} childen to doc", children.len());
+                            if children.len() == 0 {
+                                continue
+                            }
+                            let html: &Node = children[children.len() - 1].borrow();
                             let html_children = html.children.borrow();
-                            let body: &Node = html_children[1].borrow();
+                            debug!("got {} childen to html", html_children.len());
+                            if html_children.len() == 0 {
+                                continue
+                            }
+                            let body: &Node = html_children[html_children.len() - 1].borrow();
                             let body_children = &body.children;
                             node.children.swap(&body_children);
                         }
@@ -803,8 +811,32 @@ pub fn render_recursive_inner(
             }
         } else if path_str.ends_with(".html") || path_str.ends_with(".htm") {
             // let output = render(&global, &rt, cx, &mut contents, None);
-            let output = render_injecting(&global, &rt, cx, &mut contents, None, child_dom);
-            return output;
+            debug!("-> render partial html.");
+            let partial = render_dom(&global, &rt, cx, &mut contents, None, child_dom);
+            debug!("-> render partial html complete.");
+            let c_str = std::ffi::CString::new("layout").unwrap();
+            let ptr = c_str.as_ptr() as *const i8;
+            rooted!(in(cx) let mut layout_result = UndefinedValue());
+            mozjs::rust::wrappers::JS_GetProperty(
+                cx,
+                global.handle(),
+                ptr,
+                layout_result.handle_mut(),
+            );
+            debug!("-> layout -> {}", stringify_jsvalue(cx, &layout_result));
+
+            if layout_result.is_string() {
+                debug!("-> render recursive!");
+                return render_recursive_inner(
+                    &rt,
+                    cx,
+                    &std::path::Path::new(&stringify_jsvalue(cx, &layout_result)),
+                    Rc::new(Some(partial)),
+                    Some(&global),
+                );
+            } else {
+                return serialize_dom(&partial);
+            }
         } else {
             panic!("no way to parse file.");
         }
