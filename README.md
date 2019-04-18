@@ -168,3 +168,11 @@ title = 'Example'
 </html>
 ```
 
+### HTML Include
+This currently only works with HTML files.
+In a later revision, they will work with all supported types.
+
+```md
+<div x-include="./example.html"></div>
+```
+

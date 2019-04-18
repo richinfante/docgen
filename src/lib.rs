@@ -403,6 +403,48 @@ unsafe fn render_children(
                             let body_children = &body.children;
                             node.children.swap(&body_children);
                         }
+                    } else if name == "x-include" {
+                        rooted!(in(cx) let child_global =
+                        JS_NewGlobalObject(cx, &SIMPLE_GLOBAL_CLASS, ptr::null_mut(),
+                                                    OnNewGlobalHookOption::FireOnNewGlobalHook,
+                                                    &CompartmentOptions::default())
+                        );
+
+                        let _ac = mozjs::jsapi::JSAutoCompartment::new(cx, child_global.get());
+                        assert!(mozjs::rust::wrappers::JS_InitStandardClasses(
+                            cx,
+                            global.handle()
+                        ));
+
+                        let result_name = std::ffi::CString::new("parent").unwrap();
+                        let result_name_ptr = result_name.as_ptr() as *const i8;
+                        rooted!(in(cx) let val = mozjs::jsval::ObjectValue(global.get()));
+                        mozjs::rust::wrappers::JS_SetProperty(
+                            cx,
+                            child_global.handle(),
+                            result_name_ptr,
+                            val.handle()
+                        );
+
+                        let mut contents = std::fs::read_to_string(std::path::Path::new(&script)).unwrap();
+                        let partial = render_dom(&child_global, &rt, cx, &mut contents, None, std::rc::Rc::new(None));
+                        
+                        let doc: &Node = partial.document.borrow();
+                        let children: Ref<Vec<Rc<Node>>> = doc.children.borrow();
+                        debug!("got {} childen to doc", children.len());
+                        if children.len() == 0 {
+                            continue;
+                        }
+                        let html: &Node = children[children.len() - 1].borrow();
+                        let html_children = html.children.borrow();
+                        debug!("got {} childen to html", html_children.len());
+                        if html_children.len() == 0 {
+                            continue;
+                        }
+                        let body: &Node = html_children[html_children.len() - 1].borrow();
+                        let body_children = &body.children;
+                        node.children.swap(&body_children);
+
                     } else if name == "x-as" || name == "x-index" {
                         // Do nothing.
                     } else {
