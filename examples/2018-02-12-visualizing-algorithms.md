@@ -1,17 +1,15 @@
 <script static>
-layout = './examples/layout.html'
-title = 'Visualizing Algorithms'
-date = '2018-02-12 8:00:00 -0400'
-categories = ["notes", "javascript"]
-description = "Using some custom code to generate interesting graphs of algorithmic operations."
-image = "/img/sha/preview.png"
-permalink = "/2018/02/12/visualizing-algorithms"
+page.layout = './examples/layout.html'
+page.title = 'Visualizing Algorithms'
+page.date = '2018-02-12 8:00:00 -0400'
+page.categories = ["notes", "javascript"]
+page.description = "Using some custom code to generate interesting graphs of algorithmic operations."
+page.image = "/img/sha/preview.png"
+page.permalink = "/2018/02/12/visualizing-algorithms"
 </script>
 
 ## Introduction
 
-<h1>{{title}} ({{permalink}})</h1>
-<p><b>{{categories.join(', ')}}</b></p>
 I recently  <a href="https://twitter.com/richinfante/status/959984976090619904">shared this on twitter</a>, and wanted to share a bit more about how I did it:
 
 <blockquote class="twitter-tweet" data-lang="en"><p lang="en" dir="ltr">Different portions of the sha-256 algorithm (two rounds), visualized bit-by-bit as a directed graph (first ~30k, ~100k nodes, last ~100k nodes). A result of one of my recent experiments! <a href="https://t.co/cK2dLj9haT">pic.twitter.com/cK2dLj9haT</a></p>&mdash; <a href="https://twitter.com/richinfante/status/959984976090619904">Rich Infante (@richinfante) February 4, 2018</a></blockquote>

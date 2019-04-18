@@ -416,6 +416,16 @@ unsafe fn render_children(
                             global.handle()
                         ));
 
+                        let page_name = std::ffi::CString::new("page").unwrap();
+                        let page_ptr = page_name.as_ptr() as *const i8;
+                        rooted!(in(cx) let val = mozjs::jsval::ObjectValue(child_global.get()));
+                        mozjs::rust::wrappers::JS_SetProperty(
+                            cx,
+                            child_global.handle(),
+                            page_ptr,
+                            val.handle()
+                        );
+
                         let result_name = std::ffi::CString::new("parent").unwrap();
                         let result_name_ptr = result_name.as_ptr() as *const i8;
                         rooted!(in(cx) let val = mozjs::jsval::ObjectValue(global.get()));
@@ -812,6 +822,16 @@ pub fn render_recursive_inner(
             cx,
             global.handle()
         ));
+
+        let page_name = std::ffi::CString::new("page").unwrap();
+        let page_ptr = page_name.as_ptr() as *const i8;
+        rooted!(in(cx) let val = mozjs::jsval::ObjectValue(global.get()));
+        mozjs::rust::wrappers::JS_SetProperty(
+            cx,
+            global.handle(),
+            page_ptr,
+            val.handle()
+        );
 
         if let Some(child) = child {
             let result_name = std::ffi::CString::new("child").unwrap();

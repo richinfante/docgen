@@ -4,17 +4,51 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="ie=edge">
+
   <title>{{child.title}} - Rich Infante</title>
+
+  <meta name="google-site-verification" content="r_DVoWOzLQpA1VnjuP7oRXjsrPD3cn84VqOshcQwB1I" />
+
+  <!-- Begin Search Engine Tagging-->
+  <meta name="description" :content="child.description">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="http://localhost:4000/">
+  <link rel="alternate" type="application/rss+xml" title="Rich Infante" href="http://localhost:4000/feed.xml">
+  <!-- End Search Engine Tagging-->
+
+  <!-- Begin Open Graph-->
+  <meta property="og:title" :content="child.title" />
+  <meta property="og:type" content="blog" />
+  <meta property="og:description" :content="child.description" />
+  <!-- End Open Graph-->
+
+  <!-- Begin Twitter Metadata -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:site" content="richinfante">
+  <meta name="twitter:creator" content="richinfante">
+  <meta name="twitter:url" content="http://localhost:4000/">
+  <meta name="twitter:title" :content="child.title">
+  <meta name="twitter:description" :content="child.description">
+  <!-- End Twitter Metadata -->
+
+  <!-- Begin Icons -->
+  <link rel="icon" href="/img/profile_image.jpg" type="image/png">
+  <link rel="shortcut icon" href="/img/profile_image.jpg" type="image/png">
+  <!-- End Icons-->
+
+  <script static>
+  var DEBUG = true;
+  </script>
 </head>
 <body>
   <header>
-    <h1>Header Contents</h1>
+    <h1>{{child.title}}</h1>
+    <p>filed under:<b x-each="child.categories" x-as="tag">
+      <a :href="'/tags/' + tag">{{tag}}</a>
+    </b></p>
   </header>
   <main x-content-slot></main>
   <footer>
-    <p>&copy; 2015-2019 Rich Infante. All Rights Reserved.</p>
-    <p>Built at: {{new Date().toLocaleString()}}</p>
-    <p>{{docgen.version}} / {{docgen.spidermonkey_version}}</p>
     <div x-include="./examples/footer.html"></div>
   </footer>
 </body>
