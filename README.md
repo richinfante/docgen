@@ -19,7 +19,7 @@ these are features I'd like to have initially, in no particular order.
 - [x] layout includes via `layout` js variable and `x-content-slot` attribute.
 - [x] iteration logic with `x-each` (tentative name) **Experimentally Implemented**
 - [ ] conditional css class generation (similar to vuejs's :class attribute).
-- [ ] html partials via `<template src="" />` tag.
+- [x] html partials via `x-include` attribute.
 - [ ] way to extract the contents of a div to replace it. Potentially called `x-extract`
 - [ ] json/yaml/etc data file loading for configuration / data.
 - [ ] markdown support with front-matter data + rendering (similar to jekyll)
