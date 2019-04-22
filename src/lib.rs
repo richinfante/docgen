@@ -336,6 +336,7 @@ unsafe fn render_children(
             let mut needs_expansion: Option<String> = None;
             let mut replacements: Vec<Rc<Node>> = vec![];
             let mut needs_remove: bool = false;
+            let mut needs_fork: bool = false;
             let mut final_attrs: Vec<html5ever::interface::Attribute> = vec![];
             let loop_name = get_attribute(node, "x-as").unwrap_or("item".to_string());
             let index_name = get_attribute(node, "x-index").unwrap_or("i".to_string());
@@ -645,7 +646,7 @@ unsafe fn render_children(
                 }
             }
 
-            debug!("render done. injecting kids.");
+            debug!("render done. injecting {} new child elements into node.", out_children.len());
 
             node.children.replace(out_children);
 
@@ -823,30 +824,15 @@ pub fn render_recursive_inner(
             global.handle()
         ));
         
-        // let val : serde_yaml::Value = serde_yaml::from_str(r###"name: Example"###).unwrap();
-        // let fmname = std::ffi::CString::new("frontmatter").unwrap();
-        // let fmname_ptr = fmname.as_ptr() as *const i8;
-        // rooted!(in(cx) let val = val.convert_to_jsval(cx));
-        // mozjs::rust::wrappers::JS_SetProperty(
-        //     cx,
-        //     global.handle(),
-        //     fmname_ptr,
-        //     val.handle(),
-        // );
-
-        // let result_name = std::ffi::CString::new("page").unwrap();
-        // let result_name_ptr = result_name.as_ptr() as *const i8;
-        // rooted!(in(cx) let val = mozjs::jsval::ObjectValue(child.get()));
-        // mozjs::rust::wrappers::JS_SetProperty(
-        //     cx,
-        //     global.handle(),
-        //     result_name_ptr,
-        //     val.handle(),
-        // );
-
-        // HACK: we need to copy the global scope onto another object, nested.
-        // Mozjs doesnt seem to like to do this.
-        eval(&global, rt, cx, "function __copy_global__() { this.page = this }; __copy_global__(); delete __copy_global__;");
+        let result_name = std::ffi::CString::new("page").unwrap();
+        let result_name_ptr = result_name.as_ptr() as *const i8;
+        rooted!(in(cx) let val = mozjs::jsval::ObjectValue(global.get()));
+        mozjs::rust::wrappers::JS_SetProperty(
+            cx,
+            global.handle(),
+            result_name_ptr,
+            val.handle(),
+        );
 
         if let Some(child) = child {
             let result_name = std::ffi::CString::new("child").unwrap();
