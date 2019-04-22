@@ -1,4 +1,5 @@
 ---
+layout: './examples/layout.html'
 title:  'Visualizing Algorithms'
 date:   2018-02-12 8:00:00 -0400
 categories: 
@@ -9,7 +10,6 @@ image: /img/sha/preview.png
 permalink: /2018/02/12/visualizing-algorithms
 description_in_listing: true
 notruncate: false
-layout: './examples/layout.html'
 ---
 
 ## Introduction
