@@ -1,15 +1,18 @@
-<script static>
-page.layout = './examples/layout.html'
-page.title = 'Visualizing Algorithms'
-page.date = '2018-02-12 8:00:00 -0400'
-page.categories = ["notes", "javascript"]
-page.description = "Using some custom code to generate interesting graphs of algorithmic operations."
-page.image = "/img/sha/preview.png"
-page.permalink = "/2018/02/12/visualizing-algorithms"
-</script>
+---
+title:  'Visualizing Algorithms'
+date:   2018-02-12 8:00:00 -0400
+categories: 
+  - notes
+  - javascript
+description: "Using some custom code to generate interesting graphs of algorithmic operations."
+image: /img/sha/preview.png
+permalink: /2018/02/12/visualizing-algorithms
+description_in_listing: true
+notruncate: false
+layout: './examples/layout.html'
+---
 
-
-## Introduction {{frontmatter.name}}
+## Introduction
 
 I recently  <a href="https://twitter.com/richinfante/status/959984976090619904">shared this on twitter</a>, and wanted to share a bit more about how I did it:
 

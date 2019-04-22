@@ -712,8 +712,6 @@ pub fn render_dom(
                         version: "{}",
                         spidermonkey_version: "{}"
                     }};
-
-                    layout = null;
                 "###,
                 env!("CARGO_PKG_VERSION"),
                 spidermonkey_version_str_slice
@@ -824,27 +822,31 @@ pub fn render_recursive_inner(
             cx,
             global.handle()
         ));
-
-        let page_name = std::ffi::CString::new("page").unwrap();
-        let page_ptr = page_name.as_ptr() as *const i8;
-        rooted!(in(cx) let val = mozjs::jsval::ObjectValue(global.get()));
-        mozjs::rust::wrappers::JS_SetProperty(
-            cx,
-            global.handle(),
-            page_ptr,
-            val.handle()
-        );
         
-        let val : serde_yaml::Value = serde_yaml::from_str(r###"name: Example"###).unwrap();
-        let fmname = std::ffi::CString::new("frontmatter").unwrap();
-        let fmname_ptr = fmname.as_ptr() as *const i8;
-        rooted!(in(cx) let val = val.convert_to_jsval(cx));
-        mozjs::rust::wrappers::JS_SetProperty(
-            cx,
-            global.handle(),
-            fmname_ptr,
-            val.handle(),
-        );
+        // let val : serde_yaml::Value = serde_yaml::from_str(r###"name: Example"###).unwrap();
+        // let fmname = std::ffi::CString::new("frontmatter").unwrap();
+        // let fmname_ptr = fmname.as_ptr() as *const i8;
+        // rooted!(in(cx) let val = val.convert_to_jsval(cx));
+        // mozjs::rust::wrappers::JS_SetProperty(
+        //     cx,
+        //     global.handle(),
+        //     fmname_ptr,
+        //     val.handle(),
+        // );
+
+        // let result_name = std::ffi::CString::new("page").unwrap();
+        // let result_name_ptr = result_name.as_ptr() as *const i8;
+        // rooted!(in(cx) let val = mozjs::jsval::ObjectValue(child.get()));
+        // mozjs::rust::wrappers::JS_SetProperty(
+        //     cx,
+        //     global.handle(),
+        //     result_name_ptr,
+        //     val.handle(),
+        // );
+
+        // HACK: we need to copy the global scope onto another object, nested.
+        // Mozjs doesnt seem to like to do this.
+        eval(&global, rt, cx, "function __copy_global__() { this.page = this }; __copy_global__(); delete __copy_global__;");
 
         if let Some(child) = child {
             let result_name = std::ffi::CString::new("child").unwrap();
@@ -858,7 +860,42 @@ pub fn render_recursive_inner(
             );
         }
 
+        let mut override_contents : Option<String> = None;
         if path_str.ends_with(".md") {
+            match frontmatter::infer_type(&contents) {
+                frontmatter::MatterType::YAML => {
+                    if let (Some(matter), read_contents) = frontmatter::extract_frontmatter(&contents) {
+                        override_contents = Some(read_contents.to_string());
+                        let val : serde_yaml::Value = serde_yaml::from_str(matter).unwrap();
+
+                        if let serde_yaml::Value::Mapping(mapping) = val {
+                            for (k,value_to_set) in mapping.iter() {
+                                if let serde_yaml::Value::String(string) = k {
+                                    debug!("Set value at {} to {:?}", string, value_to_set);
+                                    rooted!(in(cx) let val = value_to_set.convert_to_jsval(cx));
+                                    let fmname = std::ffi::CString::new(string.as_str()).unwrap();
+                                    let fmname_ptr = fmname.as_ptr() as *const i8;
+                                    mozjs::rust::wrappers::JS_SetProperty(
+                                        cx,
+                                        global.handle(),
+                                        fmname_ptr,
+                                        val.handle(),
+                                    );
+                                } else {
+                                    panic!("front matter keys must be strings.");
+                                }
+                            }
+                        }
+  
+                        // HACK: copy the values into the "page" object.
+                        // eval(&global, &rt, cx, "for (let i in frontmatter) { page[i] = frontmatter[i] }");
+                    }
+                }
+                _ => {}
+            }
+            if let Some(override_contents) = override_contents {
+                contents = override_contents;
+            }
             let mut result = render::render_markdown(&contents);
             let partial = render_dom(&global, &rt, cx, &mut result, None, child_dom);
 
@@ -885,6 +922,7 @@ pub fn render_recursive_inner(
                 return serialize_dom(&partial);
             }
         } else if path_str.ends_with(".html") || path_str.ends_with(".htm") {
+
             // let output = render(&global, &rt, cx, &mut contents, None);
             debug!("-> render partial html.");
             let partial = render_dom(&global, &rt, cx, &mut contents, None, child_dom);

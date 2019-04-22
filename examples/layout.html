@@ -42,8 +42,8 @@
 </head>
 <body>
   <header>
-    <h1>{{child.title}}</h1>
-    <p>filed under:<b x-each="child.categories" x-as="tag">
+    <h1>{{child.page.title}}</h1>
+    <p>filed under:<b x-each="child.page.categories" x-as="tag">
       <a :href="'/tags/' + tag">{{tag}}</a>
     </b></p>
   </header>
