@@ -9,20 +9,20 @@ use html5ever::driver::ParseOpts;
 use html5ever::interface::QualName;
 use html5ever::rcdom::RcDom;
 use html5ever::rcdom::{Node, NodeData};
-use html5ever::tendril::StrTendril;
+
 use html5ever::tendril::TendrilSink;
 use html5ever::tree_builder::TreeBuilderOpts;
 use html5ever::{parse_document, serialize};
 
 use mozjs::jsapi::CompartmentOptions;
 use mozjs::jsapi::JSContext;
-use mozjs::jsapi::JSObject;
+
 use mozjs::jsapi::JS_NewGlobalObject;
 use mozjs::jsapi::OnNewGlobalHookOption;
-use mozjs::jsapi::{self, JS};
+use mozjs::jsapi::{self};
 use mozjs::jsval::JSVal;
 use mozjs::jsval::UndefinedValue;
-use mozjs::rust::{JSEngine, Runtime, SIMPLE_GLOBAL_CLASS};
+pub use mozjs::rust::{JSEngine, Runtime, ParentRuntime, SIMPLE_GLOBAL_CLASS};
 
 #[macro_use]
 extern crate log;
@@ -30,15 +30,15 @@ extern crate log;
 use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::cell::{Ref, RefMut};
-use std::collections::HashMap;
+
 use std::default::Default;
-use std::ffi::{CStr, CString};
-use std::io::{self, Write};
+use std::ffi::{CStr};
+
 use std::ptr;
 use std::rc::Rc;
 
-mod frontmatter;
-mod render;
+pub mod frontmatter;
+pub mod render;
 
 use frontmatter::EasyToJSVal;
 
@@ -98,15 +98,20 @@ pub fn eval_in_engine(
     cx: *mut JSContext,
     contents: &str,
 ) -> String {
+    rooted!(in(cx) let mut rval = UndefinedValue());
+    let res = rt.evaluate_script(
+        global.handle(),
+        contents,
+        "docgen_eval_string",
+        1,
+        rval.handle_mut(),
+    );
+
+    if !res.is_ok() {
+        panic!("Error evaluating: {}, {:?}", contents, res);
+    }
+
     unsafe {
-        rooted!(in(cx) let mut rval = UndefinedValue());
-        rt.evaluate_script(
-            global.handle(),
-            contents,
-            "docgen_eval_string",
-            1,
-            rval.handle_mut(),
-        );
         return stringify_jsvalue(cx, &rval);
     }
 }
@@ -117,18 +122,20 @@ pub fn eval(
     cx: *mut JSContext,
     contents: &str,
 ) -> Result<JSVal, ()> {
-    unsafe {
-        rooted!(in(cx) let mut rval = UndefinedValue());
-        rt.evaluate_script(
-            global.handle(),
-            contents,
-            "docgen_eval",
-            1,
-            rval.handle_mut(),
-        );
+    rooted!(in(cx) let mut rval = UndefinedValue());
+    let res = rt.evaluate_script(
+        global.handle(),
+        contents,
+        "docgen_eval",
+        1,
+        rval.handle_mut(),
+    );
 
-        return Ok(rval.clone());
+    if !res.is_ok() {
+        panic!("Error evaluating: {}, {:?}", contents, res);
     }
+
+    return Ok(rval.clone());
 }
 
 pub fn eval_in_engine_bool(
@@ -295,7 +302,7 @@ fn deep_clone(old_node: &Rc<Node>, parent: Option<Weak<Node>>) -> Rc<Node> {
     node
 }
 
-use mozjs::conversions::{FromJSValConvertible, ToJSValConvertible};
+use mozjs::conversions::{ToJSValConvertible};
 
 /// Render the children of a node, recursively.
 unsafe fn render_children(
@@ -441,7 +448,7 @@ unsafe fn render_children(
 
                         let mut contents = std::fs::read_to_string(std::path::Path::new(&script)).unwrap();
                         let partial = render_dom(&child_global, &rt, cx, &mut contents, None, std::rc::Rc::new(None));
-                        
+
                         let doc: &Node = partial.document.borrow();
                         let children: Ref<Vec<Rc<Node>>> = doc.children.borrow();
                         debug!("got {} childen to doc", children.len());
@@ -717,7 +724,7 @@ pub fn render_dom(
                 env!("CARGO_PKG_VERSION"),
                 spidermonkey_version_str_slice
             ),
-        );
+        ).unwrap();
 
         let opts = ParseOpts {
             tree_builder: TreeBuilderOpts {
@@ -726,6 +733,11 @@ pub fn render_dom(
             },
             ..Default::default()
         };
+
+        // let dom2 = html5ever::parse_fragment(RcDom::default(), opts.clone(), QualName::new(None, "".into(), "div".into()), vec![])
+        //     .from_utf8()
+        //     .read_from(&mut template.as_bytes())
+        //     .unwrap();
 
         let dom = parse_document(RcDom::default(), opts)
             .from_utf8()
@@ -744,9 +756,14 @@ pub fn render_dom(
     }
 }
 
-pub fn init_js() -> (Runtime, *mut JSContext) {
+pub fn init_runtime() -> (Runtime) {
     let engine = JSEngine::init().unwrap();
-    let rt = Runtime::new(engine);
+    Runtime::new(engine)
+
+}
+
+pub fn init_js() -> (Runtime, *mut JSContext) {
+    let rt = init_runtime();
     let cx = rt.cx();
     (rt, cx)
 }
@@ -780,7 +797,7 @@ pub fn serialize_dom(dom: &RcDom) -> String {
     return String::from_utf8(buffer).unwrap();
 }
 
-pub fn render(
+pub fn render2(
     global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,
     rt: &Runtime,
     cx: *mut JSContext,
@@ -794,9 +811,10 @@ pub fn render_recursive(
     path: &std::path::Path,
     child_dom: Rc<Option<html5ever::rcdom::RcDom>>,
     child: Option<&mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>>,
+    set_vars: Option<serde_json::Value>
 ) -> String {
     let (rt, cx) = init_js();
-    render_recursive_inner(&rt, cx, path, child_dom, child)
+    render_recursive_inner(&rt, cx, path, child_dom, child, set_vars)
 }
 /// Perform a recursive render.
 /// Attach parent global into jsengine if it exists
@@ -806,6 +824,7 @@ pub fn render_recursive_inner(
     path: &std::path::Path,
     child_dom: Rc<Option<html5ever::rcdom::RcDom>>,
     child: Option<&mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>>,
+    set_vars: Option<serde_json::Value>
 ) -> String {
     let path_str = format!("{}", path.display());
     debug!("{}", path.display());
@@ -823,7 +842,7 @@ pub fn render_recursive_inner(
             cx,
             global.handle()
         ));
-        
+
         let result_name = std::ffi::CString::new("page").unwrap();
         let result_name_ptr = result_name.as_ptr() as *const i8;
         rooted!(in(cx) let val = mozjs::jsval::ObjectValue(global.get()));
@@ -844,6 +863,23 @@ pub fn render_recursive_inner(
                 result_name_ptr,
                 val.handle(),
             );
+        }
+
+        if let Some(set_vars) = &set_vars {
+            if let serde_json::Value::Object(map) = set_vars {
+                for (key,value) in map.iter() {
+                    // println!("Set value at {} to {:?}", key, value);
+                    rooted!(in(cx) let val = value.convert_to_jsval(cx));
+                    let fmname = std::ffi::CString::new(key.as_str()).unwrap();
+                    let fmname_ptr = fmname.as_ptr() as *const i8;
+                    mozjs::rust::wrappers::JS_SetProperty(
+                        cx,
+                        global.handle(),
+                        fmname_ptr,
+                        val.handle(),
+                    );
+                }
+            }
         }
 
         let mut override_contents : Option<String> = None;
@@ -872,7 +908,7 @@ pub fn render_recursive_inner(
                                 }
                             }
                         }
-  
+
                         // HACK: copy the values into the "page" object.
                         // eval(&global, &rt, cx, "for (let i in frontmatter) { page[i] = frontmatter[i] }");
                     }
@@ -903,6 +939,7 @@ pub fn render_recursive_inner(
                     &std::path::Path::new(&stringify_jsvalue(cx, &layout_result)),
                     Rc::new(Some(partial)),
                     Some(&global),
+                    set_vars
                 );
             } else {
                 return serialize_dom(&partial);
@@ -932,6 +969,7 @@ pub fn render_recursive_inner(
                     &std::path::Path::new(&stringify_jsvalue(cx, &layout_result)),
                     Rc::new(Some(partial)),
                     Some(&global),
+                    set_vars
                 );
             } else {
                 return serialize_dom(&partial);

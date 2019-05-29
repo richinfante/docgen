@@ -13,7 +13,7 @@ pub fn render_markdown(contents: &str) -> String {
             ext_autolink: true,
             ext_tasklist: true,
             ext_superscript: true,
-            ext_header_ids: Some("h-".to_string()),
+            ext_header_ids: None,
             ext_footnotes: true,
             ext_description_lists: true,
             ..comrak::ComrakOptions::default()
