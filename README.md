@@ -66,7 +66,7 @@ At the moment, docgen only produces processes html templates. This will change i
 </head>
 <body>
   <ul>
-    <li x-each="links" x-as="link">
+    <li x-for="link in links">
       <a :href="link.href">{{link.title}}</a>
     </li>
   </ul>
@@ -131,7 +131,14 @@ note: for loops are not feature complete. All for loops currently bind to `item`
 
 ```html
 <ul>
-  <li x-for="items" x-as="item">
+  <li x-for="item in items">
+    <a :href="item.url">{{item.title}}</a>
+  </li>
+</ul>
+
+<!-- or: -->
+<ul>
+  <li x-each="items" x-as="item">
     <a :href="item.url">{{item.title}}</a>
   </li>
 </ul>

@@ -304,6 +304,22 @@ fn deep_clone(old_node: &Rc<Node>, parent: Option<Weak<Node>>) -> Rc<Node> {
 
 use mozjs::conversions::{ToJSValConvertible};
 
+pub fn parse_for_notation(notation: &str) -> (String, String, String) {
+    let simple_in_of = Regex::new(r###"^([a-zA-Z$_]+) (in|of) (.*)$"###).unwrap();
+    
+    match simple_in_of.captures(notation) {
+        Some(captures) => {
+            let name = &captures[1];
+            let kind = &captures[2];
+            let expr = &captures[3];
+            return (name.to_string(), kind.to_string(), expr.to_string())
+        },
+        _ => {
+            panic!("unsupported for-loop notation: {}", notation)
+        }
+    }
+}
+
 /// Render the children of a node, recursively.
 unsafe fn render_children(
     global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,
@@ -332,12 +348,16 @@ unsafe fn render_children(
                 if get_attribute(&node, "static").is_some() {
                     let script = inner_text(node);
                     eval_in_engine(&global, &rt, cx, &script);
+                    return CondGenFlags {
+                        remove: true,
+                        replace: None,
+                    };
+                } else {
+                    return CondGenFlags {
+                        remove: false,
+                        replace: None,
+                    };
                 }
-
-                return CondGenFlags {
-                    remove: true,
-                    replace: None,
-                };
             }
 
             let mut needs_expansion: Option<String> = None;
@@ -345,8 +365,8 @@ unsafe fn render_children(
             let mut needs_remove: bool = false;
             let mut needs_fork: bool = false;
             let mut final_attrs: Vec<html5ever::interface::Attribute> = vec![];
-            let loop_name = get_attribute(node, "x-as").unwrap_or("item".to_string());
-            let index_name = get_attribute(node, "x-index").unwrap_or("i".to_string());
+            let mut loop_name = get_attribute(node, "x-as").unwrap_or("item".to_string());
+            let mut index_name = get_attribute(node, "x-index").unwrap_or("i".to_string());
 
             {
                 let mut attributes: RefMut<Vec<html5ever::interface::Attribute>> =
@@ -394,6 +414,10 @@ unsafe fn render_children(
                         }
                     } else if name == "x-each" && loop_expansion {
                         needs_expansion = Some(script);
+                    } else if name == "x-for" && loop_expansion {
+                        let (new_loop_name, _, expression) = parse_for_notation(&script);
+                        loop_name = new_loop_name;
+                        needs_expansion = Some(expression);
                     } else if name == "x-content-slot" {
                         if let Some(contents) = slot_contents.clone().borrow() {
                             debug!("swapping slot contents into dom tree.");
@@ -978,4 +1002,29 @@ pub fn render_recursive_inner(
             panic!("no way to parse file.");
         }
     }
+}
+
+
+#[test]
+fn test_for_notation () {
+    let (name, kind, expr) = parse_for_notation("x in abc.foo()");
+    assert_eq!(name, "x");
+    assert_eq!(kind, "in");
+    assert_eq!(expr, "abc.foo()");
+}
+
+#[test]
+fn test_for_of_notation () {
+    let (name, kind, expr) = parse_for_notation("x_val of [1,2,3]");
+    assert_eq!(name, "x_val");
+    assert_eq!(kind, "of");
+    assert_eq!(expr, "[1,2,3]");
+}
+
+#[test]
+fn test_each_object_values_notation () {
+    let (name, kind, expr) = parse_for_notation("item of Object.entries({ a: 1 })");
+    assert_eq!(name, "item");
+    assert_eq!(kind, "of");
+    assert_eq!(expr, "Object.entries({ a: 1 })");
 }
