@@ -15,10 +15,11 @@ use html5ever::tendril::TendrilSink;
 use html5ever::tree_builder::TreeBuilderOpts;
 use html5ever::{parse_document, serialize};
 
+use mozjs::jsapi;
+use mozjs::jsapi::CallArgs;
 use mozjs::jsapi::CompartmentOptions;
 use mozjs::jsapi::JSContext;
-
-use mozjs::jsapi;
+use mozjs::jsapi::JSString;
 use mozjs::jsapi::JS_NewGlobalObject;
 use mozjs::jsapi::OnNewGlobalHookOption;
 use mozjs::jsval::JSVal;
@@ -43,17 +44,16 @@ use std::rc::Weak;
 pub mod frontmatter;
 pub mod render;
 
-use mozjs::jsapi::JS_ReportErrorASCII;
-// use mozjs::glue::EncodeStringToUTF8;
-use mozjs::jsapi::CallArgs;
-
-
 use frontmatter::EasyToJSVal;
 
-unsafe extern "C" fn console_log(context: *mut JSContext, argc: u32, vp: *mut mozjs::jsapi::Value) -> bool {
+unsafe extern "C" fn console_log(
+    context: *mut JSContext,
+    argc: u32,
+    vp: *mut mozjs::jsapi::Value,
+) -> bool {
     let args = CallArgs::from_vp(vp, argc);
 
-    let mut arg_strings : Vec<String> = vec![];
+    let mut arg_strings: Vec<String> = vec![];
 
     for i in 0..argc {
         let arg = mozjs::rust::Handle::from_raw(args.get(i));
@@ -63,14 +63,18 @@ unsafe extern "C" fn console_log(context: *mut JSContext, argc: u32, vp: *mut mo
     }
 
     info!("console.log: {}", arg_strings.join(" "));
-    
+
     return true;
 }
 
-unsafe extern "C" fn console_error(context: *mut JSContext, argc: u32, vp: *mut mozjs::jsapi::Value) -> bool {
+unsafe extern "C" fn console_error(
+    context: *mut JSContext,
+    argc: u32,
+    vp: *mut mozjs::jsapi::Value,
+) -> bool {
     let args = CallArgs::from_vp(vp, argc);
 
-    let mut arg_strings : Vec<String> = vec![];
+    let mut arg_strings: Vec<String> = vec![];
 
     for i in 0..argc {
         let arg = mozjs::rust::Handle::from_raw(args.get(i));
@@ -80,15 +84,18 @@ unsafe extern "C" fn console_error(context: *mut JSContext, argc: u32, vp: *mut 
     }
 
     error!("console.error: {}", arg_strings.join(" "));
-    
+
     return true;
 }
 
-
-unsafe extern "C" fn console_warn(context: *mut JSContext, argc: u32, vp: *mut mozjs::jsapi::Value) -> bool {
+unsafe extern "C" fn console_warn(
+    context: *mut JSContext,
+    argc: u32,
+    vp: *mut mozjs::jsapi::Value,
+) -> bool {
     let args = CallArgs::from_vp(vp, argc);
 
-    let mut arg_strings : Vec<String> = vec![];
+    let mut arg_strings: Vec<String> = vec![];
 
     for i in 0..argc {
         let arg = mozjs::rust::Handle::from_raw(args.get(i));
@@ -98,15 +105,18 @@ unsafe extern "C" fn console_warn(context: *mut JSContext, argc: u32, vp: *mut m
     }
 
     warn!("console.warn: {}", arg_strings.join(" "));
-    
+
     return true;
 }
 
-
-unsafe extern "C" fn console_debug(context: *mut JSContext, argc: u32, vp: *mut mozjs::jsapi::Value) -> bool {
+unsafe extern "C" fn console_debug(
+    context: *mut JSContext,
+    argc: u32,
+    vp: *mut mozjs::jsapi::Value,
+) -> bool {
     let args = CallArgs::from_vp(vp, argc);
 
-    let mut arg_strings : Vec<String> = vec![];
+    let mut arg_strings: Vec<String> = vec![];
 
     for i in 0..argc {
         let arg = mozjs::rust::Handle::from_raw(args.get(i));
@@ -116,11 +126,34 @@ unsafe extern "C" fn console_debug(context: *mut JSContext, argc: u32, vp: *mut 
     }
 
     debug!("console.debug: {}", arg_strings.join(" "));
-    
+
     return true;
 }
 
+unsafe extern "C" fn read_file_to_string(
+    context: *mut JSContext,
+    argc: u32,
+    vp: *mut mozjs::jsapi::Value,
+) -> bool {
+    let args = CallArgs::from_vp(vp, argc);
 
+    let mut arg_strings: Vec<String> = vec![];
+
+    let arg = mozjs::rust::Handle::from_raw(args.get(0));
+    let js = mozjs::rust::ToString(context, arg);
+    let script_src = mozjs::conversions::jsstr_to_string(context, js);
+
+    let loaded_script_file = std::fs::read_to_string(std::path::Path::new(&script_src)).unwrap();
+
+    rooted!(in(context) let mut val = UndefinedValue());
+    loaded_script_file.to_jsval(context, val.handle_mut());
+
+    args.rval().set(val.get());
+
+    debug!("fs.readFileSync(): {}", script_src);
+
+    return true;
+}
 
 /// Stringify a jsval into a rust string for injection into the template
 unsafe fn stringify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> String {
@@ -182,13 +215,14 @@ pub fn eval_in_engine(
     global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,
     rt: &Runtime,
     cx: *mut JSContext,
+    filename: Option<&str>,
     contents: &str,
 ) -> String {
     rooted!(in(cx) let mut rval = UndefinedValue());
     let res = rt.evaluate_script(
         global.handle(),
         contents,
-        "docgen_eval_string",
+        filename.unwrap_or("eval"),
         1,
         rval.handle_mut(),
     );
@@ -219,6 +253,7 @@ pub fn eval(
     );
 
     if !res.is_ok() {
+        print_exception(&rt, cx);
         panic!("Error evaluating: {}, {:?}", contents, res);
     }
 
@@ -428,26 +463,35 @@ unsafe fn render_children(
             // debug!("element name: {:?}", name);
             let node_name = name.local.to_string();
 
-            if node_name == "h1" || node_name == "h2" || node_name == "h3" || node_name == "h4" || node_name == "h5"  || node_name == "h6" {
+            if node_name == "h1"
+                || node_name == "h2"
+                || node_name == "h3"
+                || node_name == "h4"
+                || node_name == "h5"
+                || node_name == "h6"
+            {
+                // If id is not set, assign the ID of the <h> element for linking
                 if get_attribute(&node, "id").is_none() {
                     let content_text = inner_text(node);
                     let mut attributes: RefMut<Vec<html5ever::interface::Attribute>> =
                         attrs.borrow_mut();
                     let attribute = html5ever::interface::Attribute {
                         name: QualName::new(None, "".into(), "id".into()),
-                        value: content_text.to_lowercase().into()
+                        value: content_text.to_lowercase().into(),
                     };
                     attributes.push(attribute);
                 }
-                // attributes.append(other: &mut Self)
-            } if name.local.to_string() == "script" {
+            }
+            if name.local.to_string() == "script" {
                 if get_attribute(&node, "static").is_some() {
                     let script = inner_text(node);
-                    eval_in_engine(&global, &rt, cx, &script);
+                    eval_in_engine(&global, &rt, cx, Some("inline_script"), &script);
 
+                    // If it has a src="" attribute, load to string and execute.
                     if let Some(script_src) = get_attribute(&node, "src") {
-                        let loaded_script_file = std::fs::read_to_string(std::path::Path::new(&script_src)).unwrap();
-                        eval_in_engine(&global, &rt, cx, &loaded_script_file);
+                        let loaded_script_file =
+                            std::fs::read_to_string(std::path::Path::new(&script_src)).unwrap();
+                        eval_in_engine(&global, &rt, cx, Some(&script_src), &loaded_script_file);
                     }
 
                     return CondGenFlags {
@@ -470,6 +514,38 @@ unsafe fn render_children(
             let mut loop_name = get_attribute(node, "x-as").unwrap_or("item".to_string());
             let mut index_name = get_attribute(node, "x-index").unwrap_or("i".to_string());
 
+            if node_name == "slot" && get_attribute(node, "name") == Some("content".into()) {
+                if let Some(contents) = slot_contents.clone().borrow() {
+                    debug!("swapping slot contents into dom tree.");
+                    let doc: &Node = contents.document.borrow();
+                    let children: Ref<Vec<Rc<Node>>> = doc.children.borrow();
+                    debug!("got {} childen to doc", children.len());
+                    if children.len() == 0 {
+                        return  CondGenFlags {
+                            remove: true,
+                            replace: None
+                        }
+                    }
+                    let html: &Node = children[children.len() - 1].borrow();
+                    let html_children = html.children.borrow();
+                    debug!("got {} childen to html", html_children.len());
+                    if html_children.len() == 0 {
+                        return  CondGenFlags {
+                            remove: true,
+                            replace: None
+                        }
+                    }
+                    let body: &Node = html_children[html_children.len() - 1].borrow();
+                    let children = body.children.borrow();
+                        // let items : &Vec<std::rc::Rc<html5ever::rcdom::Node>> = children.as_ref();
+                        return CondGenFlags {
+                            remove: true,
+                            replace: Some(children.iter().map(|cn| {
+                                deep_clone(cn, Some(std::rc::Rc::downgrade(node)))
+                            }).collect())
+                        }
+                }
+            }
             {
                 let mut attributes: RefMut<Vec<html5ever::interface::Attribute>> =
                     attrs.borrow_mut();
@@ -520,26 +596,7 @@ unsafe fn render_children(
                         let (new_loop_name, _, expression) = parse_for_notation(&script);
                         loop_name = new_loop_name;
                         needs_expansion = Some(expression);
-                    } else if name == "x-content-slot" {
-                        if let Some(contents) = slot_contents.clone().borrow() {
-                            debug!("swapping slot contents into dom tree.");
-                            let doc: &Node = contents.document.borrow();
-                            let children: Ref<Vec<Rc<Node>>> = doc.children.borrow();
-                            debug!("got {} childen to doc", children.len());
-                            if children.len() == 0 {
-                                continue;
-                            }
-                            let html: &Node = children[children.len() - 1].borrow();
-                            let html_children = html.children.borrow();
-                            debug!("got {} childen to html", html_children.len());
-                            if html_children.len() == 0 {
-                                continue;
-                            }
-                            let body: &Node = html_children[html_children.len() - 1].borrow();
-                            let body_children = &body.children;
-                            node.children.swap(&body_children);
-                        }
-                    } else if name == "x-include" {
+                    } else if node_name == "slot" && name == "src" {
                         rooted!(in(cx) let child_global =
                         JS_NewGlobalObject(cx, &SIMPLE_GLOBAL_CLASS, ptr::null_mut(),
                                                     OnNewGlobalHookOption::FireOnNewGlobalHook,
@@ -596,9 +653,17 @@ unsafe fn render_children(
                             continue;
                         }
                         let body: &Node = html_children[html_children.len() - 1].borrow();
-                        let body_children = &body.children;
-                        node.children.swap(&body_children);
-                    } else if name == "x-as" || name == "x-index" {
+                        // let body_children = &body.children;
+                        // node.children.swap(&body_children);
+                        let children = body.children.borrow();
+                        // let items : &Vec<std::rc::Rc<html5ever::rcdom::Node>> = children.as_ref();
+                        return CondGenFlags {
+                            remove: true,
+                            replace: Some(children.iter().map(|cn| {
+                                deep_clone(cn, Some(std::rc::Rc::downgrade(node)))
+                            }).collect())
+                        }
+                    } else if name == "x-as" || name     == "x-index" {
                         // Do nothing.
                     } else {
                         final_attrs.push(attr.clone());
@@ -811,7 +876,7 @@ unsafe fn render_children(
                 if let Some(code) = caps.get(0) {
                     let string: &str = code.into();
                     debug!("render var: {}", string);
-                    return eval_in_engine(&global, rt, cx, string);
+                    return eval_in_engine(&global, rt, cx, Some("variable_substitution"), string);
                 }
 
                 return "".to_string();
@@ -952,6 +1017,27 @@ pub fn render_recursive(
     let (rt, cx) = init_js();
     render_recursive_inner(&rt, cx, path, child_dom, child, set_vars)
 }
+
+pub fn print_exception(rt: &Runtime, cx: *mut JSContext) {
+    unsafe {
+        rooted!(in(cx) let mut exc = UndefinedValue());
+        mozjs::rust::jsapi_wrapped::JS_GetPendingException(cx, &mut exc.handle_mut());
+        if exc.is_object() {
+            rooted!(in(cx) let exc_object = exc.to_object());
+            let c_str = std::ffi::CString::new("message").unwrap();
+            let ptr = c_str.as_ptr() as *const i8;
+            rooted!(in(cx) let mut message_res = UndefinedValue());
+            mozjs::rust::wrappers::JS_GetProperty(
+                cx,
+                exc_object.handle(),
+                ptr,
+                message_res.handle_mut(),
+            );
+            error!("Error: {}", stringify_jsvalue(cx, &message_res));
+        }
+        error!("{}", stringify_jsvalue(cx, &exc));
+    }
+}
 /// Perform a recursive render.
 /// Attach parent global into jsengine if it exists
 pub fn render_recursive_inner(
@@ -979,24 +1065,64 @@ pub fn render_recursive_inner(
             global.handle()
         ));
 
-        let function = mozjs::rust::wrappers::JS_DefineFunction(cx, global.handle(), b"console_log\0".as_ptr() as *const libc::c_char, Some(console_log), 1, 0);
+        let function = mozjs::rust::wrappers::JS_DefineFunction(
+            cx,
+            global.handle(),
+            b"console_log\0".as_ptr() as *const libc::c_char,
+            Some(console_log),
+            1,
+            0,
+        );
         assert!(!function.is_null());
 
-        let function2 = mozjs::rust::wrappers::JS_DefineFunction(cx, global.handle(), b"console_error\0".as_ptr() as *const libc::c_char, Some(console_error), 1, 0);
+        let function2 = mozjs::rust::wrappers::JS_DefineFunction(
+            cx,
+            global.handle(),
+            b"console_error\0".as_ptr() as *const libc::c_char,
+            Some(console_error),
+            1,
+            0,
+        );
         assert!(!function2.is_null());
 
-        let function3 = mozjs::rust::wrappers::JS_DefineFunction(cx, global.handle(), b"console_debug\0".as_ptr() as *const libc::c_char, Some(console_debug), 1, 0);
+        let function3 = mozjs::rust::wrappers::JS_DefineFunction(
+            cx,
+            global.handle(),
+            b"console_debug\0".as_ptr() as *const libc::c_char,
+            Some(console_debug),
+            1,
+            0,
+        );
         assert!(!function3.is_null());
 
-        let function3 = mozjs::rust::wrappers::JS_DefineFunction(cx, global.handle(), b"console_warn\0".as_ptr() as *const libc::c_char, Some(console_warn), 1, 0);
+        let function3 = mozjs::rust::wrappers::JS_DefineFunction(
+            cx,
+            global.handle(),
+            b"console_warn\0".as_ptr() as *const libc::c_char,
+            Some(console_warn),
+            1,
+            0,
+        );
         assert!(!function3.is_null());
 
-         eval(
+        let function4 = mozjs::rust::wrappers::JS_DefineFunction(
+            cx,
+            global.handle(),
+            b"fs_readFileSync\0".as_ptr() as *const libc::c_char,
+            Some(read_file_to_string),
+            1,
+            0,
+        );
+        assert!(!function4.is_null());
+
+        eval(
             &global,
             &rt,
             cx,
             r###"
-            var console = {}; 
+            var console = {};
+            var fs = {};
+            fs.readFileSync = fs_readFileSync;
             console.log = console_log;
             console.error = console_error;
             console.debug = console_debug;

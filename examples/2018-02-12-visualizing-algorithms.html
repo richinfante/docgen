@@ -35,6 +35,7 @@
   <!-- End Icons-->
 
   
+  
 </head>
 <body>
   <header>
@@ -45,7 +46,8 @@
       <a href="/tags/javascript">javascript</a>
     </b></p>
   </header>
-  <main><h2 id="introduction">Introduction</h2>
+  <main>
+    <h2 id="introduction">Introduction</h2>
 <p>I recently  <a href="https://twitter.com/richinfante/status/959984976090619904">shared this on twitter</a>, and wanted to share a bit more about how I did it:</p>
 <blockquote class="twitter-tweet" data-lang="en"><p lang="en" dir="ltr">Different portions of the sha-256 algorithm (two rounds), visualized bit-by-bit as a directed graph (first ~30k, ~100k nodes, last ~100k nodes). A result of one of my recent experiments! <a href="https://t.co/cK2dLj9haT">pic.twitter.com/cK2dLj9haT</a></p>— <a href="https://twitter.com/richinfante/status/959984976090619904">Rich Infante (@richinfante) February 4, 2018</a></blockquote>
 <div class="image-wrapper">
@@ -132,13 +134,202 @@ module.exports.Sigma0 = function Sigma0 (input) {
 <h2 id="next steps">Next steps</h2>
 <p>These outputs seem promising for both analysis of complexity and the fact that they just look cool. In the future, I may want to take this a step further and explore generating these from a compiled C (or any) program, and porting the library to other languages. I’d expect that this sort of tracking would incur both memory and runtime penalties that are a constant proportion of the existing program’s existing time complexity. However, that approach may be a very time-consuming process and it might be easier if access to the source code is available to perform a c-macro style replacement instead. This may not be applicable to algorithms outside the “math” space at its current stage, but theoretically, it can be used to analyze things like databases, application networking, and other things like complexity analysis.</p>
 <p>If you found this interesting, feel free to follow me on twitter <a href="https://twitter.com/richinfante">@richinfante</a>, and let me know if you have any comments, corrections, or thoughts!</p>
-</main>
+
+  </main>
   <footer>
-    <div><p>copyright © 2015-2019 rich infante. All Rights Reserved.</p>
-<pre>Built at: 29/07/2019, 21:37:08
+    <p>copyright © 2015-2019 rich infante. All Rights Reserved.</p>
+<pre>Built at: 30/07/2019, 09:43:18
 Version: 0.1.0
 SpiderMonkey Version: JavaScript-C60.0.3
-</pre></div>
+</pre>
+    <pre style="white-space: break-spaces;"># docgen
+
+**NOTE: Docgen is experimental software. It's not feature complete, and doesn't work half the time. It's extremely unstable, and this repo is published mostly for feedback purposes. No not rely on this software.**
+
+Docgen is a static site renderer which is built using servo's html5ever and spidermonkey. It aims to make static site generation to be effortless and removing templating languages such as liquid.
+
+Docgen's template syntax is based on / inspired by the syntax used by vuejs's templates. the rationale behind this is that all templates become are normal HTML pages and do not need extra text nodes containing the conditional / template logic. (like liquid, mustache, others..). This means pages can be developed and tested in their pure template form, without needing much (or any) tooling to do so in a nice way.
+
+Templates also allow &lt;script&gt; tags to be run (At compile time) with the `static` attribute set.
+
+Please note that the generation does **NOT** currently expose the normal javascript dom api, such as `document.createElement`, etc. It is an empty javascript context only used for templating. If this feature would be useful to you, file an issue with use cases / info.
+
+## Feature Roadmap
+these are features I'd like to have initially, in no particular order.
+- [x] add html parser
+- [x] add js engine
+- [x] conditional logic with `x-if` (tentative name)
+- [x] attribute variable expansion (`:href="link.title"` with `link = { title: 'HI' }` -&gt; `href="HI"`)
+- [x] layout includes via `layout` js variable and `x-content-slot` attribute.
+- [x] iteration logic with `x-each` (tentative name) **Experimentally Implemented**
+- [~] conditional css class generation (similar to vuejs's :class attribute). (can do bind `:class="compute_class_string_fn()"`)
+- [x] html partials via `&lt;slot src="file.html"&gt;&lt;/slot&gt;`.
+- [~] filesystem interaction - allow simple load to string from fs
+- [ ] raw html
+- [ ] way to extract the contents of a div to replace it. Potentially called `x-extract`
+- [ ] json/yaml/etc data file loading for configuration / data.
+- [ ] markdown support with front-matter data + rendering (similar to jekyll)
+- [ ] page-fork rendering: instead of iterating a page via `x-each`, render multiple copies of a page with different elements. To be used for dynamic tagging.
+- [ ] helper application to call the main `docgen` binary for site generation. This is the template engine, from which the actual site generator will discover supported template pages and render them for upload.
+
+## Building from source
+```bash
+brew install yasm autoconf
+set AUTOCONF="$(which autoconf)"
+cargo build
+```
+
+## Runing example
+```bash
+cargo run -- -i examples/demo.html
+```
+
+## Process
+1. render the page to html if it's markdown.
+2. render using the main `docgen` process, in a top-down manner.
+  - evaluate any `script static` tags.
+  - replace all template variables
+
+## Template Examples
+At the moment, docgen only produces processes html templates. This will change in the future, with options for markdown, etc.
+
+### Source Template
+```html
+&lt;html&gt;
+&lt;head&gt;
+  &lt;script static&gt;
+  let links = [{
+    href: 'https://google.com',
+    title: 'google'
+  }, {
+    href: 'https://apple.com',
+    title: 'apple'
+  },{
+    href: 'https://amazon.com',
+    title: 'amazon'
+  }]
+  &lt;/script&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;ul&gt;
+    &lt;li x-for="link in links"&gt;
+      &lt;a :href="link.href"&gt;{{link.title}}&lt;/a&gt;
+    &lt;/li&gt;
+  &lt;/ul&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+```
+
+### Result Output
+```html
+&lt;html&gt;
+&lt;head&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;ul&gt;
+    &lt;li&gt;
+      &lt;a href="https://google.com"&gt;google&lt;/a&gt;
+    &lt;/li&gt;&lt;li&gt;
+      &lt;a href="https://apple.com"&gt;apple&lt;/a&gt;
+    &lt;/li&gt;&lt;li&gt;
+      &lt;a href="https://amazon.com"&gt;amazon&lt;/a&gt;
+    &lt;/li&gt;
+  &lt;/ul&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+```
+
+## Converting from liquid
+### If statements
+```html
+{% if variable_name %}
+&lt;span&gt;Hello, World!&lt;/span&gt;
+{% endif %}
+```
+
+```html
+&lt;span x-if="variable_name"&gt;Hello, World&lt;/span&gt;
+```
+
+### Attribute bindings
+```html
+&lt;span class="{{className}}"&gt;Test&lt;/span&gt;
+```
+
+Note: the `:class` binding *may* be updated in the future to allow a dictionary, which in turn renders to a space-separated class string based on all the keys that have truthy values. (equivalent to: `Object.entries(classDict).filter(el =&gt; el[1]).map(el =&gt; el[0]).join(' ')`)
+
+```html
+&lt;span :class="className"&gt;Test&lt;/span&gt;
+```
+
+
+### For loops
+note: for loops are not feature complete. All for loops currently bind to `item` and the syntax is likely to change.
+```html
+&lt;ul&gt;
+{% for item in items %}
+  &lt;li&gt;
+    &lt;a href="{{item.url}}"&gt;{{item.title}}&lt;/a&gt;
+  &lt;/li&gt;
+{% endfor %}
+&lt;/ul&gt;
+```
+
+```html
+&lt;ul&gt;
+  &lt;li x-for="item in items"&gt;
+    &lt;a :href="item.url"&gt;{{item.title}}&lt;/a&gt;
+  &lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;!-- or: --&gt;
+&lt;ul&gt;
+  &lt;li x-each="items" x-as="item"&gt;
+    &lt;a :href="item.url"&gt;{{item.title}}&lt;/a&gt;
+  &lt;/li&gt;
+&lt;/ul&gt;
+```
+
+### Template Extension
+**hello.md**
+```md
+&lt;script&gt;
+layout = './base.html'
+title = 'Example'
+&lt;/script&gt;
+
+# Hello, World
+```
+
+**base.html**
+```html
+&lt;html&gt;
+  &lt;head&gt;{{child.title}}&lt;/head&gt;
+  &lt;body&gt;
+    &lt;div x-content-slot&gt;&lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+```
+
+**out.html**
+```html
+&lt;html&gt;
+  &lt;head&gt;Example&lt;/head&gt;
+  &lt;body&gt;
+    &lt;h1&gt;Hello, World&lt;/h1&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+```
+
+### HTML Include
+This currently only works with HTML files.
+In a later revision, they will work with all supported types.
+
+```md
+&lt;slot src="./example.html"&gt;&lt;/slot&gt;
+```
+
+</pre>
   </footer>
 
 

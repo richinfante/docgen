@@ -18,8 +18,10 @@ these are features I'd like to have initially, in no particular order.
 - [x] attribute variable expansion (`:href="link.title"` with `link = { title: 'HI' }` -> `href="HI"`)
 - [x] layout includes via `layout` js variable and `x-content-slot` attribute.
 - [x] iteration logic with `x-each` (tentative name) **Experimentally Implemented**
-- [ ] conditional css class generation (similar to vuejs's :class attribute).
-- [x] html partials via `x-include` attribute.
+- [~] conditional css class generation (similar to vuejs's :class attribute). (can do bind `:class="compute_class_string_fn()"`)
+- [x] html partials via `<slot src="file.html"></slot>`.
+- [~] filesystem interaction - allow simple load to string from fs
+- [ ] raw html
 - [ ] way to extract the contents of a div to replace it. Potentially called `x-extract`
 - [ ] json/yaml/etc data file loading for configuration / data.
 - [ ] markdown support with front-matter data + rendering (similar to jekyll)
@@ -180,6 +182,6 @@ This currently only works with HTML files.
 In a later revision, they will work with all supported types.
 
 ```md
-<div x-include="./example.html"></div>
+<slot src="./example.html"></slot>
 ```
 

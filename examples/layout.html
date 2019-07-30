@@ -36,6 +36,7 @@
   <link rel="shortcut icon" href="/img/profile_image.jpg" type="image/png">
   <!-- End Icons-->
 
+  <script src="./examples/foo.js" static></script>
   <script static>
   var DEBUG = true;
   if (DEBUG) {
@@ -50,9 +51,12 @@
       <a :href="'/tags/' + tag">{{tag}}</a>
     </b></p>
   </header>
-  <main x-content-slot></main>
+  <main>
+    <slot name="content"></slot>
+  </main>
   <footer>
-    <div x-include="./examples/footer.html"></div>
+    <slot src="./examples/footer.html"></slot>
+    <pre style="white-space: break-spaces;">{{fs.readFileSync('./README.md')}}</pre>
   </footer>
 </body>
 </html>
