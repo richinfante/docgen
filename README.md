@@ -181,7 +181,7 @@ title = 'Example'
 This currently only works with HTML files.
 In a later revision, they will work with all supported types.
 
-```md
+```html
 <slot src="./example.html"></slot>
 ```
 
