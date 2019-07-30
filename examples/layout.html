@@ -38,12 +38,15 @@
 
   <script static>
   var DEBUG = true;
+  if (DEBUG) {
+    console.warn("debug mode is enabled!");
+  }
   </script>
 </head>
 <body>
   <header>
     <h1>{{child.page.title}}</h1>
-    <p>filed under:<b x-each="child.page.categories" x-as="tag">
+    <p>filed under:<b x-for="tag in child.page.categories">
       <a :href="'/tags/' + tag">{{tag}}</a>
     </b></p>
   </header>

@@ -10,6 +10,7 @@ use html5ever::interface::QualName;
 use html5ever::rcdom::RcDom;
 use html5ever::rcdom::{Node, NodeData};
 
+use html5ever::interface::Attribute;
 use html5ever::tendril::TendrilSink;
 use html5ever::tree_builder::TreeBuilderOpts;
 use html5ever::{parse_document, serialize};
@@ -17,12 +18,12 @@ use html5ever::{parse_document, serialize};
 use mozjs::jsapi::CompartmentOptions;
 use mozjs::jsapi::JSContext;
 
+use mozjs::jsapi;
 use mozjs::jsapi::JS_NewGlobalObject;
 use mozjs::jsapi::OnNewGlobalHookOption;
-use mozjs::jsapi::{self};
 use mozjs::jsval::JSVal;
 use mozjs::jsval::UndefinedValue;
-pub use mozjs::rust::{JSEngine, Runtime, ParentRuntime, SIMPLE_GLOBAL_CLASS};
+pub use mozjs::rust::{JSEngine, ParentRuntime, Runtime, SIMPLE_GLOBAL_CLASS};
 
 #[macro_use]
 extern crate log;
@@ -32,15 +33,94 @@ use std::cell::RefCell;
 use std::cell::{Ref, RefMut};
 
 use std::default::Default;
-use std::ffi::{CStr};
+use std::ffi::CStr;
 
+use std::cell::Cell;
 use std::ptr;
 use std::rc::Rc;
+use std::rc::Weak;
 
 pub mod frontmatter;
 pub mod render;
 
+use mozjs::jsapi::JS_ReportErrorASCII;
+// use mozjs::glue::EncodeStringToUTF8;
+use mozjs::jsapi::CallArgs;
+
+
 use frontmatter::EasyToJSVal;
+
+unsafe extern "C" fn console_log(context: *mut JSContext, argc: u32, vp: *mut mozjs::jsapi::Value) -> bool {
+    let args = CallArgs::from_vp(vp, argc);
+
+    let mut arg_strings : Vec<String> = vec![];
+
+    for i in 0..argc {
+        let arg = mozjs::rust::Handle::from_raw(args.get(i));
+        let js = mozjs::rust::ToString(context, arg);
+        let message = mozjs::conversions::jsstr_to_string(context, js);
+        arg_strings.push(message);
+    }
+
+    info!("console.log: {}", arg_strings.join(" "));
+    
+    return true;
+}
+
+unsafe extern "C" fn console_error(context: *mut JSContext, argc: u32, vp: *mut mozjs::jsapi::Value) -> bool {
+    let args = CallArgs::from_vp(vp, argc);
+
+    let mut arg_strings : Vec<String> = vec![];
+
+    for i in 0..argc {
+        let arg = mozjs::rust::Handle::from_raw(args.get(i));
+        let js = mozjs::rust::ToString(context, arg);
+        let message = mozjs::conversions::jsstr_to_string(context, js);
+        arg_strings.push(message);
+    }
+
+    error!("console.error: {}", arg_strings.join(" "));
+    
+    return true;
+}
+
+
+unsafe extern "C" fn console_warn(context: *mut JSContext, argc: u32, vp: *mut mozjs::jsapi::Value) -> bool {
+    let args = CallArgs::from_vp(vp, argc);
+
+    let mut arg_strings : Vec<String> = vec![];
+
+    for i in 0..argc {
+        let arg = mozjs::rust::Handle::from_raw(args.get(i));
+        let js = mozjs::rust::ToString(context, arg);
+        let message = mozjs::conversions::jsstr_to_string(context, js);
+        arg_strings.push(message);
+    }
+
+    warn!("console.warn: {}", arg_strings.join(" "));
+    
+    return true;
+}
+
+
+unsafe extern "C" fn console_debug(context: *mut JSContext, argc: u32, vp: *mut mozjs::jsapi::Value) -> bool {
+    let args = CallArgs::from_vp(vp, argc);
+
+    let mut arg_strings : Vec<String> = vec![];
+
+    for i in 0..argc {
+        let arg = mozjs::rust::Handle::from_raw(args.get(i));
+        let js = mozjs::rust::ToString(context, arg);
+        let message = mozjs::conversions::jsstr_to_string(context, js);
+        arg_strings.push(message);
+    }
+
+    debug!("console.debug: {}", arg_strings.join(" "));
+    
+    return true;
+}
+
+
 
 /// Stringify a jsval into a rust string for injection into the template
 unsafe fn stringify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> String {
@@ -64,10 +144,11 @@ unsafe fn stringify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> String {
         }
     }
 
-    unimplemented!()
+    return "(error: stringify_jsvalue unimplemented type!)".to_string();
 }
 
 /// Boolean check for a jsval.
+/// This is used for x-if.
 unsafe fn boolify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> bool {
     if rval.is_number() {
         return rval.to_number() != 0.0;
@@ -76,7 +157,10 @@ unsafe fn boolify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> bool {
     } else if rval.is_double() {
         return rval.to_double() != 0.0;
     } else if rval.is_string() {
-        return mozjs::conversions::jsstr_to_string(cx, rval.to_string()).len() > 0;
+        return mozjs::conversions::jsstr_to_string(cx, rval.to_string())
+            .trim()
+            .len()
+            > 0;
     } else if rval.is_undefined() {
         return false;
     } else if rval.is_null() {
@@ -92,6 +176,8 @@ unsafe fn boolify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> bool {
     unimplemented!()
 }
 
+/// Evaluate a javascript string in the engine, with respect to a specific global object.
+/// Return a string representing the value
 pub fn eval_in_engine(
     global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,
     rt: &Runtime,
@@ -116,6 +202,7 @@ pub fn eval_in_engine(
     }
 }
 
+// Evaluate and return a javascript value
 pub fn eval(
     global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,
     rt: &Runtime,
@@ -138,6 +225,7 @@ pub fn eval(
     return Ok(rval.clone());
 }
 
+/// Evaluate an expression in the engine, and return whether or not the return value is truthy.
 pub fn eval_in_engine_bool(
     global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,
     rt: &Runtime,
@@ -220,8 +308,7 @@ pub fn get_attribute(node: &Rc<Node>, key: &str) -> Option<String> {
     }
 }
 
-use html5ever::interface::Attribute;
-
+/// Clone the data inside of a node.
 fn clone_node_data(data: &NodeData) -> NodeData {
     match data {
         NodeData::Document => NodeData::Document,
@@ -269,8 +356,6 @@ fn clone_node_data(data: &NodeData) -> NodeData {
         },
     }
 }
-use std::cell::Cell;
-use std::rc::Weak;
 
 fn deep_clone(old_node: &Rc<Node>, parent: Option<Weak<Node>>) -> Rc<Node> {
     let mut node = Rc::new(Node {
@@ -302,21 +387,19 @@ fn deep_clone(old_node: &Rc<Node>, parent: Option<Weak<Node>>) -> Rc<Node> {
     node
 }
 
-use mozjs::conversions::{ToJSValConvertible};
+use mozjs::conversions::ToJSValConvertible;
 
 pub fn parse_for_notation(notation: &str) -> (String, String, String) {
     let simple_in_of = Regex::new(r###"^([a-zA-Z$_]+) (in|of) (.*)$"###).unwrap();
-    
+
     match simple_in_of.captures(notation) {
         Some(captures) => {
             let name = &captures[1];
             let kind = &captures[2];
             let expr = &captures[3];
-            return (name.to_string(), kind.to_string(), expr.to_string())
-        },
-        _ => {
-            panic!("unsupported for-loop notation: {}", notation)
+            return (name.to_string(), kind.to_string(), expr.to_string());
         }
+        _ => panic!("unsupported for-loop notation: {}", notation),
     }
 }
 
@@ -343,11 +426,30 @@ unsafe fn render_children(
         }
         NodeData::Element { name, attrs, .. } => {
             // debug!("element name: {:?}", name);
+            let node_name = name.local.to_string();
 
-            if name.local.to_string() == "script" {
+            if node_name == "h1" || node_name == "h2" || node_name == "h3" || node_name == "h4" || node_name == "h5"  || node_name == "h6" {
+                if get_attribute(&node, "id").is_none() {
+                    let content_text = inner_text(node);
+                    let mut attributes: RefMut<Vec<html5ever::interface::Attribute>> =
+                        attrs.borrow_mut();
+                    let attribute = html5ever::interface::Attribute {
+                        name: QualName::new(None, "".into(), "id".into()),
+                        value: content_text.to_lowercase().into()
+                    };
+                    attributes.push(attribute);
+                }
+                // attributes.append(other: &mut Self)
+            } if name.local.to_string() == "script" {
                 if get_attribute(&node, "static").is_some() {
                     let script = inner_text(node);
                     eval_in_engine(&global, &rt, cx, &script);
+
+                    if let Some(script_src) = get_attribute(&node, "src") {
+                        let loaded_script_file = std::fs::read_to_string(std::path::Path::new(&script_src)).unwrap();
+                        eval_in_engine(&global, &rt, cx, &loaded_script_file);
+                    }
+
                     return CondGenFlags {
                         remove: true,
                         replace: None,
@@ -457,7 +559,7 @@ unsafe fn render_children(
                             cx,
                             child_global.handle(),
                             page_ptr,
-                            val.handle()
+                            val.handle(),
                         );
 
                         let result_name = std::ffi::CString::new("parent").unwrap();
@@ -467,11 +569,19 @@ unsafe fn render_children(
                             cx,
                             child_global.handle(),
                             result_name_ptr,
-                            val.handle()
+                            val.handle(),
                         );
 
-                        let mut contents = std::fs::read_to_string(std::path::Path::new(&script)).unwrap();
-                        let partial = render_dom(&child_global, &rt, cx, &mut contents, None, std::rc::Rc::new(None));
+                        let mut contents =
+                            std::fs::read_to_string(std::path::Path::new(&script)).unwrap();
+                        let partial = render_dom(
+                            &child_global,
+                            &rt,
+                            cx,
+                            &mut contents,
+                            None,
+                            std::rc::Rc::new(None),
+                        );
 
                         let doc: &Node = partial.document.borrow();
                         let children: Ref<Vec<Rc<Node>>> = doc.children.borrow();
@@ -488,7 +598,6 @@ unsafe fn render_children(
                         let body: &Node = html_children[html_children.len() - 1].borrow();
                         let body_children = &body.children;
                         node.children.swap(&body_children);
-
                     } else if name == "x-as" || name == "x-index" {
                         // Do nothing.
                     } else {
@@ -562,7 +671,7 @@ unsafe fn render_children(
                             break;
                         }
 
-                        /// 5. Get result.value
+                        // 5. Get result.value
                         rooted!(in(cx) let mut iteration_result_value = UndefinedValue());
 
                         if iteration_value.is_object() {
@@ -655,14 +764,14 @@ unsafe fn render_children(
             //   value: "true".into()
             // });
 
-            debug!("Rendering children...");
+            // debug!("Rendering children...");
             let mut out_children: Vec<Rc<Node>> = vec![];
 
             {
                 let mut children = node.children.borrow_mut();
-                debug!("have {} children.", children.len());
+                // debug!("have {} children.", children.len());
                 for item in children.iter_mut() {
-                    debug!("Rendering child...");
+                    // debug!("Rendering child...");
                     let flags = render_children(global, rt, cx, item, true, slot_contents.clone());
 
                     if !flags.remove {
@@ -677,7 +786,10 @@ unsafe fn render_children(
                 }
             }
 
-            debug!("render done. injecting {} new child elements into node.", out_children.len());
+            // debug!(
+            //     "render done. injecting {} new child elements into node.",
+            //     out_children.len()
+            // );
 
             node.children.replace(out_children);
 
@@ -748,7 +860,8 @@ pub fn render_dom(
                 env!("CARGO_PKG_VERSION"),
                 spidermonkey_version_str_slice
             ),
-        ).unwrap();
+        )
+        .unwrap();
 
         let opts = ParseOpts {
             tree_builder: TreeBuilderOpts {
@@ -783,7 +896,6 @@ pub fn render_dom(
 pub fn init_runtime() -> (Runtime) {
     let engine = JSEngine::init().unwrap();
     Runtime::new(engine)
-
 }
 
 pub fn init_js() -> (Runtime, *mut JSContext) {
@@ -835,7 +947,7 @@ pub fn render_recursive(
     path: &std::path::Path,
     child_dom: Rc<Option<html5ever::rcdom::RcDom>>,
     child: Option<&mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>>,
-    set_vars: Option<serde_json::Value>
+    set_vars: Option<serde_json::Value>,
 ) -> String {
     let (rt, cx) = init_js();
     render_recursive_inner(&rt, cx, path, child_dom, child, set_vars)
@@ -848,7 +960,7 @@ pub fn render_recursive_inner(
     path: &std::path::Path,
     child_dom: Rc<Option<html5ever::rcdom::RcDom>>,
     child: Option<&mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>>,
-    set_vars: Option<serde_json::Value>
+    set_vars: Option<serde_json::Value>,
 ) -> String {
     let path_str = format!("{}", path.display());
     debug!("{}", path.display());
@@ -867,15 +979,36 @@ pub fn render_recursive_inner(
             global.handle()
         ));
 
+        let function = mozjs::rust::wrappers::JS_DefineFunction(cx, global.handle(), b"console_log\0".as_ptr() as *const libc::c_char, Some(console_log), 1, 0);
+        assert!(!function.is_null());
+
+        let function2 = mozjs::rust::wrappers::JS_DefineFunction(cx, global.handle(), b"console_error\0".as_ptr() as *const libc::c_char, Some(console_error), 1, 0);
+        assert!(!function2.is_null());
+
+        let function3 = mozjs::rust::wrappers::JS_DefineFunction(cx, global.handle(), b"console_debug\0".as_ptr() as *const libc::c_char, Some(console_debug), 1, 0);
+        assert!(!function3.is_null());
+
+        let function3 = mozjs::rust::wrappers::JS_DefineFunction(cx, global.handle(), b"console_warn\0".as_ptr() as *const libc::c_char, Some(console_warn), 1, 0);
+        assert!(!function3.is_null());
+
+         eval(
+            &global,
+            &rt,
+            cx,
+            r###"
+            var console = {}; 
+            console.log = console_log;
+            console.error = console_error;
+            console.debug = console_debug;
+            console.warn = console_warn;
+            "###,
+        )
+        .unwrap();
+
         let result_name = std::ffi::CString::new("page").unwrap();
         let result_name_ptr = result_name.as_ptr() as *const i8;
         rooted!(in(cx) let val = mozjs::jsval::ObjectValue(global.get()));
-        mozjs::rust::wrappers::JS_SetProperty(
-            cx,
-            global.handle(),
-            result_name_ptr,
-            val.handle(),
-        );
+        mozjs::rust::wrappers::JS_SetProperty(cx, global.handle(), result_name_ptr, val.handle());
 
         if let Some(child) = child {
             let result_name = std::ffi::CString::new("child").unwrap();
@@ -891,7 +1024,7 @@ pub fn render_recursive_inner(
 
         if let Some(set_vars) = &set_vars {
             if let serde_json::Value::Object(map) = set_vars {
-                for (key,value) in map.iter() {
+                for (key, value) in map.iter() {
                     // println!("Set value at {} to {:?}", key, value);
                     rooted!(in(cx) let val = value.convert_to_jsval(cx));
                     let fmname = std::ffi::CString::new(key.as_str()).unwrap();
@@ -906,16 +1039,18 @@ pub fn render_recursive_inner(
             }
         }
 
-        let mut override_contents : Option<String> = None;
+        let mut override_contents: Option<String> = None;
         if path_str.ends_with(".md") {
             match frontmatter::infer_type(&contents) {
                 frontmatter::MatterType::YAML => {
-                    if let (Some(matter), read_contents) = frontmatter::extract_frontmatter(&contents) {
+                    if let (Some(matter), read_contents) =
+                        frontmatter::extract_frontmatter(&contents)
+                    {
                         override_contents = Some(read_contents.to_string());
-                        let val : serde_yaml::Value = serde_yaml::from_str(matter).unwrap();
+                        let val: serde_yaml::Value = serde_yaml::from_str(matter).unwrap();
 
                         if let serde_yaml::Value::Mapping(mapping) = val {
-                            for (k,value_to_set) in mapping.iter() {
+                            for (k, value_to_set) in mapping.iter() {
                                 if let serde_yaml::Value::String(string) = k {
                                     debug!("Set value at {} to {:?}", string, value_to_set);
                                     rooted!(in(cx) let val = value_to_set.convert_to_jsval(cx));
@@ -963,13 +1098,12 @@ pub fn render_recursive_inner(
                     &std::path::Path::new(&stringify_jsvalue(cx, &layout_result)),
                     Rc::new(Some(partial)),
                     Some(&global),
-                    set_vars
+                    set_vars,
                 );
             } else {
                 return serialize_dom(&partial);
             }
         } else if path_str.ends_with(".html") || path_str.ends_with(".htm") {
-
             // let output = render(&global, &rt, cx, &mut contents, None);
             debug!("-> render partial html.");
             let partial = render_dom(&global, &rt, cx, &mut contents, None, child_dom);
@@ -993,7 +1127,7 @@ pub fn render_recursive_inner(
                     &std::path::Path::new(&stringify_jsvalue(cx, &layout_result)),
                     Rc::new(Some(partial)),
                     Some(&global),
-                    set_vars
+                    set_vars,
                 );
             } else {
                 return serialize_dom(&partial);
@@ -1004,9 +1138,8 @@ pub fn render_recursive_inner(
     }
 }
 
-
 #[test]
-fn test_for_notation () {
+fn test_for_notation() {
     let (name, kind, expr) = parse_for_notation("x in abc.foo()");
     assert_eq!(name, "x");
     assert_eq!(kind, "in");
@@ -1014,7 +1147,7 @@ fn test_for_notation () {
 }
 
 #[test]
-fn test_for_of_notation () {
+fn test_for_of_notation() {
     let (name, kind, expr) = parse_for_notation("x_val of [1,2,3]");
     assert_eq!(name, "x_val");
     assert_eq!(kind, "of");
@@ -1022,7 +1155,7 @@ fn test_for_of_notation () {
 }
 
 #[test]
-fn test_each_object_values_notation () {
+fn test_each_object_values_notation() {
     let (name, kind, expr) = parse_for_notation("item of Object.entries({ a: 1 })");
     assert_eq!(name, "item");
     assert_eq!(kind, "of");

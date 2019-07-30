@@ -1,14 +1,14 @@
 use mozjs::jsval::UndefinedValue;
 
-use mozjs::conversions::ToJSValConvertible;
-use mozjs::jsval::JSVal;
-use serde_json::Value as JSONValue;
-use serde_yaml::Value as YAMLValue;
 use cargo_toml::Value as TOMLValue;
-use mozjs::jsapi::Value as JSValue;
+use mozjs::conversions::ToJSValConvertible;
 use mozjs::jsapi::JSContext;
+use mozjs::jsapi::Value as JSValue;
+use mozjs::jsval::JSVal;
 use mozjs::rust::MutableHandleValue;
 use mozjs::rust::SIMPLE_GLOBAL_CLASS;
+use serde_json::Value as JSONValue;
+use serde_yaml::Value as YAMLValue;
 
 // pub enum Value {
 //     /// Represents a YAML null value.
@@ -27,12 +27,11 @@ use mozjs::rust::SIMPLE_GLOBAL_CLASS;
 //     Mapping(Mapping),
 // }
 
-
 #[derive(Debug, PartialEq)]
 pub enum MatterType {
     JSON,
     YAML,
-    NotFound
+    NotFound,
 }
 
 pub trait EasyToJSVal {
@@ -47,34 +46,35 @@ impl EasyToJSVal for TOMLValue {
                 rooted!(in(cx) let mut val = UndefinedValue());
                 boolean.to_jsval(cx, val.handle_mut());
                 val.get()
-            },
+            }
             TOMLValue::String(string) => {
                 rooted!(in(cx) let mut val = UndefinedValue());
                 string.to_jsval(cx, val.handle_mut());
                 val.get()
-            },
+            }
             TOMLValue::Float(number) => {
                 rooted!(in(cx) let mut val = UndefinedValue());
                 number.to_jsval(cx, val.handle_mut());
                 val.get()
-            },
+            }
             TOMLValue::Integer(number) => {
                 rooted!(in(cx) let mut val = UndefinedValue());
                 number.to_jsval(cx, val.handle_mut());
                 val.get()
-            },
+            }
             TOMLValue::Array(vector) => {
-                let items = vector.iter().map(|item| {
-                    item.convert_to_jsval(cx)
-                }).collect::<Vec<JSValue>>();
+                let items = vector
+                    .iter()
+                    .map(|item| item.convert_to_jsval(cx))
+                    .collect::<Vec<JSValue>>();
 
                 rooted!(in(cx) let mut val = UndefinedValue());
                 items.to_jsval(cx, val.handle_mut());
                 val.get()
-            },
+            }
             TOMLValue::Table(mapping) => {
                 let obj = mozjs::jsapi::JS_NewObject(cx, &SIMPLE_GLOBAL_CLASS);
-                for (string,v) in mapping.iter() {
+                for (string, v) in mapping.iter() {
                     let page_name = std::ffi::CString::new(string.as_str()).unwrap();
                     let page_ptr = page_name.as_ptr() as *const i8;
                     rooted!(in(cx) let object = mozjs::jsval::ObjectValue(obj).to_object());
@@ -83,13 +83,13 @@ impl EasyToJSVal for TOMLValue {
                         cx,
                         object.handle(),
                         page_ptr,
-                        value.handle()
+                        value.handle(),
                     );
                 }
 
                 mozjs::jsval::ObjectValue(obj)
             }
-            _ => unimplemented!()
+            _ => unimplemented!(),
         }
     }
 }
@@ -102,15 +102,13 @@ impl EasyToJSVal for JSONValue {
                 rooted!(in(cx) let mut val = UndefinedValue());
                 boolean.to_jsval(cx, val.handle_mut());
                 val.get()
-            },
-            JSONValue::Null => {
-                mozjs::jsval::NullValue()
-            },
+            }
+            JSONValue::Null => mozjs::jsval::NullValue(),
             JSONValue::String(string) => {
                 rooted!(in(cx) let mut val = UndefinedValue());
                 string.to_jsval(cx, val.handle_mut());
                 val.get()
-            },
+            }
             JSONValue::Number(number) => {
                 rooted!(in(cx) let mut val = UndefinedValue());
                 if number.is_f64() {
@@ -124,19 +122,20 @@ impl EasyToJSVal for JSONValue {
                 }
 
                 val.get()
-            },
+            }
             JSONValue::Array(vector) => {
-                let items = vector.iter().map(|item| {
-                    item.convert_to_jsval(cx)
-                }).collect::<Vec<JSValue>>();
+                let items = vector
+                    .iter()
+                    .map(|item| item.convert_to_jsval(cx))
+                    .collect::<Vec<JSValue>>();
 
                 rooted!(in(cx) let mut val = UndefinedValue());
                 items.to_jsval(cx, val.handle_mut());
                 val.get()
-            },
+            }
             JSONValue::Object(mapping) => {
                 let obj = mozjs::jsapi::JS_NewObject(cx, &SIMPLE_GLOBAL_CLASS);
-                for (string,v) in mapping.iter() {
+                for (string, v) in mapping.iter() {
                     let page_name = std::ffi::CString::new(string.as_str()).unwrap();
                     let page_ptr = page_name.as_ptr() as *const i8;
                     rooted!(in(cx) let object = mozjs::jsval::ObjectValue(obj).to_object());
@@ -145,13 +144,13 @@ impl EasyToJSVal for JSONValue {
                         cx,
                         object.handle(),
                         page_ptr,
-                        value.handle()
+                        value.handle(),
                     );
                 }
 
                 mozjs::jsval::ObjectValue(obj)
             }
-            _ => unimplemented!()
+            _ => unimplemented!(),
         }
     }
 }
@@ -160,19 +159,17 @@ impl EasyToJSVal for JSONValue {
 impl EasyToJSVal for YAMLValue {
     unsafe fn convert_to_jsval(&self, cx: *mut JSContext) -> JSValue {
         match self {
-            YAMLValue::Null => {
-                mozjs::jsval::NullValue()
-            },
+            YAMLValue::Null => mozjs::jsval::NullValue(),
             YAMLValue::String(string) => {
                 rooted!(in(cx) let mut val = UndefinedValue());
                 string.to_jsval(cx, val.handle_mut());
                 val.get()
-            },
+            }
             YAMLValue::Bool(boolean) => {
                 rooted!(in(cx) let mut val = UndefinedValue());
                 boolean.to_jsval(cx, val.handle_mut());
                 val.get()
-            },
+            }
             YAMLValue::Number(number) => {
                 rooted!(in(cx) let mut val = UndefinedValue());
                 if number.is_f64() {
@@ -186,19 +183,20 @@ impl EasyToJSVal for YAMLValue {
                 }
 
                 val.get()
-            },
+            }
             YAMLValue::Sequence(vector) => {
-                let items = vector.iter().map(|item| {
-                    item.convert_to_jsval(cx)
-                }).collect::<Vec<JSValue>>();
+                let items = vector
+                    .iter()
+                    .map(|item| item.convert_to_jsval(cx))
+                    .collect::<Vec<JSValue>>();
 
                 rooted!(in(cx) let mut val = UndefinedValue());
                 items.to_jsval(cx, val.handle_mut());
                 val.get()
-            },
+            }
             YAMLValue::Mapping(mapping) => {
                 let obj = mozjs::jsapi::JS_NewObject(cx, &SIMPLE_GLOBAL_CLASS);
-                for (k,v) in mapping.iter() {
+                for (k, v) in mapping.iter() {
                     match k {
                         YAMLValue::String(string) => {
                             let page_name = std::ffi::CString::new(string.as_str()).unwrap();
@@ -209,26 +207,25 @@ impl EasyToJSVal for YAMLValue {
                                 cx,
                                 object.handle(),
                                 page_ptr,
-                                value.handle()
+                                value.handle(),
                             );
-                        },
-                        _ => unimplemented!()
+                        }
+                        _ => unimplemented!(),
                     }
                 }
 
                 mozjs::jsval::ObjectValue(obj)
-            }   
+            }
         }
     }
 }
 
 /// Front matter is defined by the block at the top of a document, separated by triple dashes "---"
 pub fn extract_frontmatter(document: &str) -> (Option<&str>, &str) {
-    
     let mut trimmed = document.trim();
 
     if !trimmed.starts_with("---\n") {
-        return (None, document)
+        return (None, document);
     }
 
     trimmed = trimmed[3..].trim();
@@ -245,11 +242,11 @@ pub fn extract_frontmatter(document: &str) -> (Option<&str>, &str) {
 
         // println!("{}: {} - {}, {}", i, c, dash_counter, was_newline);
         if dash_counter == 3 && was_newline {
-            return (Some(&trimmed[..i-3]), &trimmed[i+1..])
+            return (Some(&trimmed[..i - 3]), &trimmed[i + 1..]);
         }
     }
 
-    return (None, document)
+    return (None, document);
 }
 
 pub fn infer_type(matter: &str) -> MatterType {
@@ -268,11 +265,10 @@ pub fn infer_type(matter: &str) -> MatterType {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     #[test]
-    fn test_infer_json () {
+    fn test_infer_json() {
         let doc = r###"
         ---
         {
@@ -280,23 +276,32 @@ mod tests {
         }
         ---"###;
 
-        assert_eq!(crate::frontmatter::infer_type(&doc), crate::frontmatter::MatterType::JSON);
+        assert_eq!(
+            crate::frontmatter::infer_type(&doc),
+            crate::frontmatter::MatterType::JSON
+        );
     }
 
-        #[test]
-    fn test_infer_yaml () {
+    #[test]
+    fn test_infer_yaml() {
         let doc = r###"---
         title: YAML Front Matter
         ---"###;
 
-        assert_eq!(crate::frontmatter::infer_type(&doc), crate::frontmatter::MatterType::YAML);
+        assert_eq!(
+            crate::frontmatter::infer_type(&doc),
+            crate::frontmatter::MatterType::YAML
+        );
     }
 
     #[test]
-    fn test_infer_none () {
+    fn test_infer_none() {
         let doc = r###"some article begins right here. nothing to see."###;
 
-        assert_eq!(crate::frontmatter::infer_type(&doc), crate::frontmatter::MatterType::NotFound);
+        assert_eq!(
+            crate::frontmatter::infer_type(&doc),
+            crate::frontmatter::MatterType::NotFound
+        );
     }
 
     #[test]
@@ -307,8 +312,16 @@ description: Foo
 other: Bar
 ---"###;
 
-        assert_eq!(crate::frontmatter::extract_frontmatter(doc), (Some(r###"title: YAML Front Matter
+        assert_eq!(
+            crate::frontmatter::extract_frontmatter(doc),
+            (
+                Some(
+                    r###"title: YAML Front Matter
 description: Foo
-other: Bar"###), ""));
+other: Bar"###
+                ),
+                ""
+            )
+        );
     }
 }
