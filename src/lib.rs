@@ -228,6 +228,7 @@ pub fn eval_in_engine(
     );
 
     if !res.is_ok() {
+        print_exception(&rt, cx);
         panic!("Error evaluating: {}, {:?}", contents, res);
     }
 
@@ -413,7 +414,7 @@ fn deep_clone(old_node: &Rc<Node>, parent: Option<Weak<Node>>) -> Rc<Node> {
     let node_mut = node.borrow_mut();
     node_mut.children.replace(new);
 
-    debug!(
+    trace!(
         "deep clone info. {} kids had, {} kids found.",
         old_node.children.borrow().len(),
         node_mut.children.borrow().len()
@@ -460,7 +461,7 @@ unsafe fn render_children(
             return CondGenFlags::default();
         }
         NodeData::Element { name, attrs, .. } => {
-            // debug!("element name: {:?}", name);
+            trace!("element name: {:?}", name);
             let node_name = name.local.to_string();
 
             if node_name == "h1"
@@ -516,10 +517,10 @@ unsafe fn render_children(
 
             if node_name == "slot" && get_attribute(node, "name") == Some("content".into()) {
                 if let Some(contents) = slot_contents.clone().borrow() {
-                    debug!("swapping slot contents into dom tree.");
+                    trace!("swapping slot contents into dom tree.");
                     let doc: &Node = contents.document.borrow();
                     let children: Ref<Vec<Rc<Node>>> = doc.children.borrow();
-                    debug!("got {} childen to doc", children.len());
+                    trace!("got {} childen to doc", children.len());
                     if children.len() == 0 {
                         return  CondGenFlags {
                             remove: true,
@@ -528,7 +529,7 @@ unsafe fn render_children(
                     }
                     let html: &Node = children[children.len() - 1].borrow();
                     let html_children = html.children.borrow();
-                    debug!("got {} childen to html", html_children.len());
+                    trace!("got {} childen to html", html_children.len());
                     if html_children.len() == 0 {
                         return  CondGenFlags {
                             remove: true,
@@ -551,7 +552,7 @@ unsafe fn render_children(
                     attrs.borrow_mut();
 
                 for attr in attributes.iter_mut() {
-                    // debug!("{:?}", attr);
+                    trace!("{:?}", attr);
                     let name = &attr.name.local.to_string();
                     let script = String::from(&attr.value);
                     if name.starts_with(":") {
@@ -642,13 +643,13 @@ unsafe fn render_children(
 
                         let doc: &Node = partial.document.borrow();
                         let children: Ref<Vec<Rc<Node>>> = doc.children.borrow();
-                        debug!("got {} childen to doc", children.len());
+                        trace!("got {} childen to doc", children.len());
                         if children.len() == 0 {
                             continue;
                         }
                         let html: &Node = children[children.len() - 1].borrow();
                         let html_children = html.children.borrow();
-                        debug!("got {} childen to html", html_children.len());
+                        trace!("got {} childen to html", html_children.len());
                         if html_children.len() == 0 {
                             continue;
                         }
@@ -675,7 +676,7 @@ unsafe fn render_children(
 
             if let Some(script) = needs_expansion {
                 if loop_expansion {
-                    debug!("begin loop expansion on {:?}", name);
+                    trace!("begin loop expansion on {:?}", name);
                     // 0. Run the script and setup replacement list.
                     let object = eval(&global, &rt, cx, &script).unwrap();
 
@@ -684,7 +685,7 @@ unsafe fn render_children(
                     let id = mozjs::glue::RUST_SYMBOL_TO_JSID(sym);
 
                     if !object.is_object() {
-                        debug!("eval returned non-object!");
+                        trace!("eval returned non-object!");
                     }
 
                     // 2. object[Symbol.iterator]
@@ -715,7 +716,7 @@ unsafe fn render_children(
 
                     loop {
                         needs_remove = true;
-                        debug!("iterating thing...");
+                        trace!("iterating thing...");
                         // 4. Call the iterator.next() function
                         rooted!(in(cx) let returnvalue = UndefinedValue());
                         rooted!(in(cx) let iter_result = iterret.to_object());
@@ -732,7 +733,7 @@ unsafe fn render_children(
                         );
 
                         if !iteration_value.is_object() {
-                            debug!("iteration is not obj");
+                            trace!("iteration is not obj");
                             break;
                         }
 
@@ -764,14 +765,14 @@ unsafe fn render_children(
                             done_str_ptr,
                             iteration_done_value.handle_mut(),
                         );
-                        debug!(
+                        trace!(
                             "iter done -> {}",
                             stringify_jsvalue(cx, &iteration_done_value)
                         );
 
                         // Boolify javascript
                         if boolify_jsvalue(cx, &iteration_done_value) {
-                            debug!("is done. return.");
+                            trace!("is done. return.");
                             break;
                         }
 
@@ -829,14 +830,14 @@ unsafe fn render_children(
             //   value: "true".into()
             // });
 
-            // debug!("Rendering children...");
+            trace!("Rendering children...");
             let mut out_children: Vec<Rc<Node>> = vec![];
 
             {
                 let mut children = node.children.borrow_mut();
-                // debug!("have {} children.", children.len());
+                trace!("have {} children.", children.len());
                 for item in children.iter_mut() {
-                    // debug!("Rendering child...");
+                    trace!("Rendering child...");
                     let flags = render_children(global, rt, cx, item, true, slot_contents.clone());
 
                     if !flags.remove {
@@ -851,10 +852,10 @@ unsafe fn render_children(
                 }
             }
 
-            // debug!(
-            //     "render done. injecting {} new child elements into node.",
-            //     out_children.len()
-            // );
+            trace!(
+                "render done. injecting {} new child elements into node.",
+                out_children.len()
+            );
 
             node.children.replace(out_children);
 
@@ -868,14 +869,12 @@ unsafe fn render_children(
             // let contents : String = tendril.into();
             let x = format!("{}", tendril);
 
-            // debug!("Text Node: {}", x);
-
             let regex = Regex::new(r###"\{\{(.*?)\}\}"###).unwrap();
 
             let result = regex.replace_all(&x, |caps: &Captures| {
                 if let Some(code) = caps.get(0) {
                     let string: &str = code.into();
-                    debug!("render var: {}", string);
+                    trace!("render var: {}", string);
                     return eval_in_engine(&global, rt, cx, Some("variable_substitution"), string);
                 }
 
@@ -1035,7 +1034,6 @@ pub fn print_exception(rt: &Runtime, cx: *mut JSContext) {
             );
             error!("Error: {}", stringify_jsvalue(cx, &message_res));
         }
-        error!("{}", stringify_jsvalue(cx, &exc));
     }
 }
 /// Perform a recursive render.
@@ -1049,7 +1047,7 @@ pub fn render_recursive_inner(
     set_vars: Option<serde_json::Value>,
 ) -> String {
     let path_str = format!("{}", path.display());
-    debug!("{}", path.display());
+    debug!("rendering path: {}", path.display());
     let mut contents = std::fs::read_to_string(&path).unwrap();
 
     unsafe {

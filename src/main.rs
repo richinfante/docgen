@@ -7,8 +7,24 @@ mod render;
 #[macro_use]
 extern crate log;
 
+use std::env;
+use std::io::Write;
+use log::LevelFilter;
+use env_logger::Builder;
+use colored::*;
+
 fn main() -> io::Result<()> {
-    env_logger::init();
+    let mut builder = Builder::from_default_env();
+
+    builder.format(|buf, record| writeln!(buf, "{:>8} {}", match record.level() {
+        log::Level::Trace => "Trace".white().dimmed(),
+        log::Level::Debug => "Debug".blue(),
+        log::Level::Warn => "Warning".yellow(),
+        log::Level::Error => "Error".red(),
+        log::Level::Info => "Info".green()
+    }, record.args()))
+           .filter(None, LevelFilter::Info)
+           .init();
 
     let matches = App::new("docgen")
         .version(env!("CARGO_PKG_VERSION"))

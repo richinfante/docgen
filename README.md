@@ -25,7 +25,7 @@ these are features I'd like to have initially, in no particular order.
 - [ ] way to extract the contents of a div to replace it. Potentially called `x-extract`
 - [ ] json/yaml/etc data file loading for configuration / data.
 - [ ] markdown support with front-matter data + rendering (similar to jekyll)
-- [ ] page-fork rendering: instead of iterating a page via `x-each`, render multiple copies of a page with different elements. To be used for dynamic tagging.
+- [ ] page-fork rendering: instead of iterating a page via `x-each`, render multiple copies of a page with different elements. To be used for dynamic tagging. (this is a place where jekyll doesn't work well.)
 - [ ] helper application to call the main `docgen` binary for site generation. This is the template engine, from which the actual site generator will discover supported template pages and render them for upload.
 
 ## Building from source

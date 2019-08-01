@@ -28,3 +28,4 @@ env_logger = "0.6.1"
 
 glob = "0.3.0"
 clap = "2.33.0"
+colored = "1.8"
