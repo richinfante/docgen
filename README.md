@@ -1,6 +1,6 @@
 # docgen
 
-**NOTE: Docgen is experimental software. It's not feature complete, and doesn't work half the time. It's extremely unstable, and this repo is published mostly for feedback purposes. No not rely on this software.**
+**NOTE: Docgen is experimental "alpha" software.**
 
 Docgen is a static site renderer which is built using servo's html5ever and spidermonkey. It aims to make static site generation to be effortless and removing templating languages such as liquid.
 
