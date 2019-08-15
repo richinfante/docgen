@@ -10,7 +10,7 @@ jobs:
     steps:
     - uses: actions/checkout@v1
     - name: Deps
-      run: sudo apt-get install clang-6.0
+      run: sudo apt-get install clang-6.0 yasm autoconf
     - name: Build
       run: cargo build --verbose
     - name: Run tests
