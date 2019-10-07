@@ -514,8 +514,13 @@ unsafe fn render_children(
             let mut final_attrs: Vec<html5ever::interface::Attribute> = vec![];
             let mut loop_name = get_attribute(node, "x-as").unwrap_or("item".to_string());
             let mut index_name = get_attribute(node, "x-index").unwrap_or("i".to_string());
-
-            if node_name == "slot" && get_attribute(node, "name") == Some("content".into()) {
+            if let Some(val) = get_attribute(node, "slot") {
+                info!("found slot contents for {}", val);
+                return  CondGenFlags {
+                    remove: true,
+                    replace: None
+                }
+            } else if node_name == "slot" && get_attribute(node, "name") == Some("content".into()) {
                 if let Some(contents) = slot_contents.clone().borrow() {
                     trace!("swapping slot contents into dom tree.");
                     let doc: &Node = contents.document.borrow();
