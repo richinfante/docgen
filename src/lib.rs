@@ -589,7 +589,7 @@ unsafe fn render_children(
             } else if node_name == "slot" && get_attribute(node, "name") .is_some() {
                 let slot_name = get_attribute(node, "name").unwrap();
 
-                if slot_name == "contents"  {
+                if slot_name == "content"  {
                     if let Some(contents) = slot_contents.clone().borrow() {
                         trace!("swapping slot contents into dom tree.");
                         let doc: &Node = contents.document.borrow();
