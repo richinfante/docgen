@@ -12,11 +12,8 @@ description_in_listing: true
 notruncate: false
 ---
 
-<div slot="javascript">
-<!-- BEGIN SLOT CONTENTS -->
-<div src="https://richinfante.com/script.js"></div>
-<!-- END SLOT CONTENTS -->
-</div>
+<script slot="javascript" src="https://richinfante.com/script.js"></script>
+<link slot="stylesheet" rel="stylesheet" href="https://richinfante.com/styles.css"/>
 
 ## Introduction
 

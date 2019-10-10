@@ -32,12 +32,12 @@
   <!-- End Twitter Metadata -->
 
   <!-- Begin Icons -->
+  <!-- slot: stylesheet -->
   <link rel="icon" href="/img/profile_image.jpg" type="image/png">
   <link rel="shortcut icon" href="/img/profile_image.jpg" type="image/png">
   <!-- End Icons-->
 
   <script src="./examples/foo.js" static></script>
-
   <script static>
   var DEBUG = true;
   if (DEBUG) {
@@ -45,8 +45,6 @@
   }
   console.log(...Object.keys(page))
   </script>
-
-  <meta name="twitter:description2" :content="child.description">
 </head>
 <body>
   <header>
@@ -60,11 +58,11 @@
   </main>
   <footer>
     <slot src="./examples/footer.html"></slot>
+    <!-- include: ./examples/footer.html -->
+
     <slot name="footer"></slot>
-    <!-- BEFORE SLOT -->
     <slot name="javascript"></slot>
-    <!-- AFTET SLOT -->
-    <pre style="white-space: break-spaces;">{{fs.readFileSync('./README.md')}}</pre>
+    <!-- <pre style="white-space: break-spaces;">{{fs.readFileSync('./README.md')}}</pre>-->
   </footer>
 </body>
 </html>
