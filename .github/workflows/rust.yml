@@ -12,6 +12,6 @@ jobs:
     - name: Deps
       run: sudo apt-get install clang-6.0 yasm autoconf2.13
     - name: Build
-      run: cargo build --verbose
+      run: SHELL=/bin/bash cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
