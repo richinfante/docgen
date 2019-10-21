@@ -647,32 +647,18 @@ unsafe fn render_children(
                     let script = String::from(&attr.value);
                     if name.starts_with(":") {
                         let final_name = name[1..].to_string();
-                        attr.name = QualName::new(None, "".into(), final_name.into());
-                        // if final_name == "class" {
+                        attr.name = QualName::new(None, "".into(), final_name.clone().into());
                         let value: JSVal = eval(&global, &rt, cx, &script).unwrap();
-                        // if value.is_string() || value.is_number() || value.is_boolean() {
                         attr.value = stringify_jsvalue(cx, &value).into();
-                        // } else if value.is_object() {
-                        //     rooted!(in(cx) let mut entries = UndefinedValue());
-                        //
-                        //     let next_str = std::ffi::CString::new("next").unwrap();
-                        //     let next_ptr = next_str.as_ptr() as *const i8;
-                        //     let args = mozjs::jsapi::HandleValueArray::new();
-                        //     rooted!(in(cx) let mut iteration_value = UndefinedValue());
-                        //     mozjs::rust::wrappers::JS_CallFunctionName(
-                        //         cx,
-                        //         iter_result.handle(),
-                        //         next_ptr,
-                        //         &args,
-                        //         iteration_value.handle_mut(),
-                        //     );
-                        // }
-
-                        final_attrs.push(attr.clone());
-                    // } else {
-                    //     attr.value = eval_in_engine(&global, &rt, cx, &script).into();
-                    //     final_attrs.push(attr.clone());
-                    // }
+                        
+                        // support for boolean flag type attribute names
+                        if final_name == "checked" || final_name == "selected" || final_name == "hidden" {
+                            if boolify_jsvalue(cx, &value) {
+                                final_attrs.push(attr.clone());
+                            }
+                        } else {
+                            final_attrs.push(attr.clone());
+                        }
                     } else if name == "x-if" {
                         let included = eval_in_engine_bool(&global, &rt, cx, &script);
                         if !included {
