@@ -29,9 +29,10 @@ pub use mozjs::rust::{JSEngine, ParentRuntime, Runtime, SIMPLE_GLOBAL_CLASS};
 #[macro_use]
 extern crate log;
 
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::{Borrow};
 use std::cell::RefCell;
 use std::cell::{Ref, RefMut};
+use std::sync::Arc;
 
 use std::default::Default;
 use std::ffi::CStr;
@@ -394,6 +395,7 @@ fn clone_node_data(data: &NodeData) -> NodeData {
 }
 
 fn deep_clone(old_node: &Rc<Node>, parent: Option<Weak<Node>>) -> Rc<Node> {
+    use std::borrow::BorrowMut;
     let mut node = Rc::new(Node {
         children: RefCell::new(vec![]),
         data: clone_node_data(old_node.data.borrow()),
@@ -439,6 +441,59 @@ pub fn parse_for_notation(notation: &str) -> (String, String, String) {
     }
 }
 
+pub struct RenderContext {
+    /// Contains a mapping of slot contents to the contexts for them.
+    pub slots: std::collections::HashMap<String, Vec<Rc<RefCell<RenderContext>>>>,
+
+    pub contents: Rc<html5ever::rcdom::Node>,
+
+    pub children: Vec<Rc<RefCell<RenderContext>>>
+}
+
+impl RenderContext {
+    fn new_with_subcontext(contents: Rc<html5ever::rcdom::Node>, context: Option<Rc<RefCell<RenderContext>>>) -> RenderContext {
+        if let Some(context) = context {
+            RenderContext {
+                slots: std::collections::HashMap::new(),
+                contents,
+                children: vec![
+                    context
+                ]
+            }
+        } else {
+            RenderContext::new(contents)
+        }
+    }
+
+    fn new(contents: Rc<html5ever::rcdom::Node>) -> RenderContext {
+        RenderContext {
+            slots: std::collections::HashMap::new(),
+            contents,
+            children: vec![]
+        }
+    }
+
+    fn find_slot_contents(&self, slot: &str) -> Vec<Rc<RefCell<RenderContext>>> {
+        let mut items : Vec<Rc<RefCell<RenderContext>>> = vec![];
+
+        if let Some(vals) = self.slots.get(slot) {
+            for item in vals {
+                items.push(item.clone());
+            }
+        }
+
+        for child in self.children.iter() {
+            let child2 : Rc<RefCell<RenderContext>> = child.clone();
+            let ch = child2.borrow_mut();
+            for item in ch.find_slot_contents(slot) {
+                items.push(item.clone());
+            }
+        }
+
+        return items
+    }
+}
+
 /// Render the children of a node, recursively.
 unsafe fn render_children(
     global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,
@@ -446,6 +501,7 @@ unsafe fn render_children(
     cx: *mut JSContext,
     node: &mut Rc<Node>,
     loop_expansion: bool,
+    render_context: Rc<RefCell<RenderContext>>,
     slot_contents: Rc<Option<html5ever::rcdom::RcDom>>,
 ) -> CondGenFlags {
     let flags = CondGenFlags::default();
@@ -455,14 +511,15 @@ unsafe fn render_children(
             let mut children = node.children.borrow_mut();
 
             for item in children.iter_mut() {
-                render_children(global, rt, cx, item, true, slot_contents.clone());
+                render_children(global, rt, cx, item, true, render_context.clone(), slot_contents.clone());
             }
 
             return CondGenFlags::default();
         }
         NodeData::Element { name, attrs, .. } => {
-            trace!("element name: {:?}", name);
             let node_name = name.local.to_string();
+            debug!("-> enter element: {:?}", node_name);
+            
 
             if node_name == "h1"
                 || node_name == "h2"
@@ -499,11 +556,6 @@ unsafe fn render_children(
                         remove: true,
                         replace: None,
                     };
-                } else {
-                    return CondGenFlags {
-                        remove: false,
-                        replace: None,
-                    };
                 }
             }
 
@@ -514,37 +566,75 @@ unsafe fn render_children(
             let mut final_attrs: Vec<html5ever::interface::Attribute> = vec![];
             let mut loop_name = get_attribute(node, "x-as").unwrap_or("item".to_string());
             let mut index_name = get_attribute(node, "x-index").unwrap_or("i".to_string());
+            debug!("{}: slot={:?}, name={:?}", node_name, get_attribute(node, "slot"), get_attribute(node, "name"));
+            if let Some(val) = get_attribute(node, "slot") {
+                debug!("found element named {} to add to {}", node_name, val);
 
-            if node_name == "slot" && get_attribute(node, "name") == Some("content".into()) {
-                if let Some(contents) = slot_contents.clone().borrow() {
-                    trace!("swapping slot contents into dom tree.");
-                    let doc: &Node = contents.document.borrow();
-                    let children: Ref<Vec<Rc<Node>>> = doc.children.borrow();
-                    trace!("got {} childen to doc", children.len());
-                    if children.len() == 0 {
-                        return  CondGenFlags {
-                            remove: true,
-                            replace: None
+                {
+                    let mut inner = render_context.borrow_mut();
+                    inner.slots.entry(val)
+                        .or_insert_with(Vec::new)
+                        .push(Rc::new(RefCell::new(RenderContext::new(node.clone()))));
+                }
+
+                return CondGenFlags {
+                    remove: true,
+                    replace: None
+                }
+            } else if (node_name == "slot" && get_attribute(node, "name") .is_some()) {
+                let slot_name = get_attribute(node, "name").unwrap();
+
+                if slot_name == "content"  {
+                    if let Some(contents) = slot_contents.clone().borrow() {
+                        trace!("swapping slot contents into dom tree.");
+                        let doc: &Node = contents.document.borrow();
+                        let children: Ref<Vec<Rc<Node>>> = doc.children.borrow();
+                        trace!("got {} childen to doc", children.len());
+                        if children.len() == 0 {
+                            return  CondGenFlags {
+                                remove: true,
+                                replace: None
+                            }
                         }
-                    }
-                    let html: &Node = children[children.len() - 1].borrow();
-                    let html_children = html.children.borrow();
-                    trace!("got {} childen to html", html_children.len());
-                    if html_children.len() == 0 {
-                        return  CondGenFlags {
-                            remove: true,
-                            replace: None
+                        let html: &Node = children[children.len() - 1].borrow();
+                        let html_children = html.children.borrow();
+                        trace!("got {} childen to html", html_children.len());
+                        if html_children.len() == 0 {
+                            return  CondGenFlags {
+                                remove: true,
+                                replace: None
+                            }
                         }
+                        let body: &Node = html_children[html_children.len() - 1].borrow();
+                        let children = body.children.borrow();
+                            // let items : &Vec<std::rc::Rc<html5ever::rcdom::Node>> = children.as_ref();
+                            return CondGenFlags {
+                                remove: true,
+                                replace: Some(children.iter().map(|cn| {
+                                    deep_clone(cn, Some(std::rc::Rc::downgrade(node)))
+                                }).collect())
+                            }
                     }
-                    let body: &Node = html_children[html_children.len() - 1].borrow();
-                    let children = body.children.borrow();
+                } else {
+                    
+                    // let slot : &RenderContext = ;
+                    let found_slot_contents = render_context.borrow_mut().find_slot_contents(&slot_name);
+                    
+                    if found_slot_contents.len() > 0 {
+                    debug!("-> found slot contents: {}", &slot_name);
                         // let items : &Vec<std::rc::Rc<html5ever::rcdom::Node>> = children.as_ref();
                         return CondGenFlags {
                             remove: true,
-                            replace: Some(children.iter().map(|cn| {
-                                deep_clone(cn, Some(std::rc::Rc::downgrade(node)))
+                            replace: Some(found_slot_contents.iter().map(|v| {
+                                v.borrow_mut().contents.clone()
                             }).collect())
                         }
+                    } else {
+                        return CondGenFlags {
+                            remove: true,
+                            replace: None
+                        }
+                    }
                 }
             }
             {
@@ -597,7 +687,7 @@ unsafe fn render_children(
                         let (new_loop_name, _, expression) = parse_for_notation(&script);
                         loop_name = new_loop_name;
                         needs_expansion = Some(expression);
-                    } else if node_name == "slot" && name == "src" {
+                    } else if (node_name == "slot" && name == "src") {
                         rooted!(in(cx) let child_global =
                         JS_NewGlobalObject(cx, &SIMPLE_GLOBAL_CLASS, ptr::null_mut(),
                                                     OnNewGlobalHookOption::FireOnNewGlobalHook,
@@ -632,14 +722,21 @@ unsafe fn render_children(
 
                         let mut contents =
                             std::fs::read_to_string(std::path::Path::new(&script)).unwrap();
-                        let partial = render_dom(
+                        let (partial, child_render_context) = parse_and_render_dom(
                             &child_global,
                             &rt,
                             cx,
                             &mut contents,
                             None,
+                            None,
                             std::rc::Rc::new(None),
                         );
+
+                        {
+                            let ccx = render_context.clone();
+                            let mut mut_ctx = ccx.borrow_mut();
+                            mut_ctx.children.push(child_render_context.clone());
+                        }
 
                         let doc: &Node = partial.document.borrow();
                         let children: Ref<Vec<Rc<Node>>> = doc.children.borrow();
@@ -815,6 +912,7 @@ unsafe fn render_children(
                             cx,
                             &mut expand_node,
                             false,
+                            render_context.clone(),
                             slot_contents.clone(),
                         );
                         replacements.push(expand_node);
@@ -830,34 +928,37 @@ unsafe fn render_children(
             //   value: "true".into()
             // });
 
-            trace!("Rendering children...");
-            let mut out_children: Vec<Rc<Node>> = vec![];
+            if node_name != "script" {
+                trace!("Rendering children...");
+                let mut out_children: Vec<Rc<Node>> = vec![];
 
-            {
-                let mut children = node.children.borrow_mut();
-                trace!("have {} children.", children.len());
-                for item in children.iter_mut() {
-                    trace!("Rendering child...");
-                    let flags = render_children(global, rt, cx, item, true, slot_contents.clone());
+                {
+                    let mut children = node.children.borrow_mut();
+                    trace!("have {} children.", children.len());
+                    for item in children.iter_mut() {
+                        trace!("Rendering child...");
+                        let flags = render_children(global, rt, cx, item, true, render_context.clone(),slot_contents.clone());
 
-                    if !flags.remove {
-                        out_children.push(item.clone())
-                    }
+                        if !flags.remove {
+                            out_children.push(item.clone())
+                        }
 
-                    if let Some(replacements) = flags.replace {
-                        for item in replacements {
-                            out_children.push(item);
+                        if let Some(replacements) = flags.replace {
+                            for item in replacements {
+                                out_children.push(item);
+                            }
                         }
                     }
                 }
+
+                debug!("-> leave element: {:?}", node_name);
+                trace!(
+                    "render done. injecting {} new child elements into node.",
+                    out_children.len()
+                );
+
+                node.children.replace(out_children);
             }
-
-            trace!(
-                "render done. injecting {} new child elements into node.",
-                out_children.len()
-            );
-
-            node.children.replace(out_children);
 
             CondGenFlags {
                 replace: Some(replacements),
@@ -885,7 +986,68 @@ unsafe fn render_children(
             tendril.try_push_bytes(result.as_bytes()).unwrap();
             return CondGenFlags::default();
         }
-        NodeData::Comment { .. } => return CondGenFlags::default(),
+        NodeData::Comment { contents } => {
+            let text = format!("{}", contents);
+            let trimmed = text.trim();
+            if trimmed.starts_with("slot:") {
+                debug!("got slot processing instruction: '{}'", text);
+                let x = trimmed.replace("slot:", "");
+                let slot_name = x.trim();
+                
+                if slot_name == "content" {
+                    if let Some(contents) = slot_contents.clone().borrow() {
+                        trace!("slot: swapping slot contents into dom tree.");
+                        let doc: &Node = contents.document.borrow();
+                        let children: Ref<Vec<Rc<Node>>> = doc.children.borrow();
+                        trace!("slot: got {} childen to doc", children.len());
+                        if children.len() == 0 {
+                            return  CondGenFlags {
+                                remove: true,
+                                replace: None
+                            }
+                        }
+                        let html: &Node = children[children.len() - 1].borrow();
+                        let html_children = html.children.borrow();
+                        trace!("slot: got {} childen to html", html_children.len());
+                        if html_children.len() == 0 {
+                            return  CondGenFlags {
+                                remove: true,
+                                replace: None
+                            }
+                        }
+                        let body: &Node = html_children[html_children.len() - 1].borrow();
+                        let children = body.children.borrow();
+                            // let items : &Vec<std::rc::Rc<html5ever::rcdom::Node>> = children.as_ref();
+                            return CondGenFlags {
+                                remove: true,
+                                replace: Some(children.iter().map(|cn| {
+                                    deep_clone(cn, Some(std::rc::Rc::downgrade(node)))
+                                }).collect())
+                            }
+                    }
+                } else {
+                    let found_slot_contents = render_context.borrow_mut().find_slot_contents(&slot_name);
+                    
+                    if found_slot_contents.len() > 0 {
+                    debug!("slot: found slot contents: {}", &slot_name);
+                        // let items : &Vec<std::rc::Rc<html5ever::rcdom::Node>> = children.as_ref();
+                        return CondGenFlags {
+                            remove: true,
+                            replace: Some(found_slot_contents.iter().map(|v| {
+                                v.borrow_mut().contents.clone()
+                            }).collect())
+                        }
+                    } else {
+                        return CondGenFlags {
+                            remove: true,
+                            replace: None
+                        }
+                    }
+                }
+            }
+
+            return CondGenFlags::default()
+        },
         NodeData::Doctype { .. } => return CondGenFlags::default(),
         NodeData::ProcessingInstruction { .. } => {
             return CondGenFlags::default();
@@ -893,15 +1055,48 @@ unsafe fn render_children(
     }
 }
 
-/// Render a template.
-pub fn render_dom(
+pub fn parse_and_render_dom (
     global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,
     rt: &Runtime,
     cx: *mut JSContext,
     template: &mut String,
     _variables: Option<Value>,
+    parent_render_context: Option<Rc<RefCell<RenderContext>>>,
     slot_contents: Rc<Option<html5ever::rcdom::RcDom>>,
-) -> html5ever::rcdom::RcDom {
+) -> (html5ever::rcdom::RcDom, Rc<RefCell<RenderContext>>) {
+    let opts = ParseOpts {
+            tree_builder: TreeBuilderOpts {
+                drop_doctype: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // let dom2 = html5ever::parse_fragment(RcDom::default(), opts.clone(), QualName::new(None, "".into(), "div".into()), vec![])
+        //     .from_utf8()
+        //     .read_from(&mut template.as_bytes())
+        //     .unwrap();
+
+        let dom = parse_document(RcDom::default(), opts)
+            .from_utf8()
+            .read_from(&mut template.as_bytes())
+            .unwrap();
+
+    return render_dom(
+        global, rt, cx, dom, _variables, parent_render_context, slot_contents
+    )        
+}
+
+/// Render a template.
+pub fn render_dom(
+    global: &mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>,
+    rt: &Runtime,
+    cx: *mut JSContext,
+    dom: html5ever::rcdom::RcDom,
+    _variables: Option<Value>,
+    parent_render_context: Option<Rc<RefCell<RenderContext>>>,
+    slot_contents: Rc<Option<html5ever::rcdom::RcDom>>,
+) -> (html5ever::rcdom::RcDom, Rc<RefCell<RenderContext>>) {
     unsafe {
         // NOTE: this line is important, without it all JS_ calls seem to segfault.
 
@@ -927,33 +1122,17 @@ pub fn render_dom(
         )
         .unwrap();
 
-        let opts = ParseOpts {
-            tree_builder: TreeBuilderOpts {
-                drop_doctype: false,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        // let dom2 = html5ever::parse_fragment(RcDom::default(), opts.clone(), QualName::new(None, "".into(), "div".into()), vec![])
-        //     .from_utf8()
-        //     .read_from(&mut template.as_bytes())
-        //     .unwrap();
-
-        let dom = parse_document(RcDom::default(), opts)
-            .from_utf8()
-            .read_from(&mut template.as_bytes())
-            .unwrap();
+        let render_context = Rc::new(RefCell::new(RenderContext::new_with_subcontext(dom.document.clone(), parent_render_context)));
 
         {
             let document: &Node = dom.document.borrow();
             let mut docchildren: RefMut<Vec<Rc<Node>>> = document.children.borrow_mut();
             for a in docchildren.iter_mut() {
-                render_children(&global, &rt, cx, a, true, slot_contents.clone());
+                render_children(&global, &rt, cx, a, true, render_context.clone(), slot_contents.clone());
             }
         }
 
-        dom
+        (dom, render_context)
     }
 }
 
@@ -976,7 +1155,7 @@ pub fn render_injecting(
     variables: Option<Value>,
     inject_dom: Rc<Option<html5ever::rcdom::RcDom>>,
 ) -> String {
-    let dom = render_dom(&global, rt, cx, template, variables, inject_dom);
+    let (dom, render_context) = parse_and_render_dom(&global, rt, cx, template, variables, None, inject_dom);
 
     let mut buffer = vec![];
 
@@ -1014,7 +1193,7 @@ pub fn render_recursive(
     set_vars: Option<serde_json::Value>,
 ) -> String {
     let (rt, cx) = init_js();
-    render_recursive_inner(&rt, cx, path, child_dom, child, set_vars)
+    render_recursive_inner(&rt, cx, path, None, child_dom, child, set_vars)
 }
 
 pub fn print_exception(rt: &Runtime, cx: *mut JSContext) {
@@ -1042,6 +1221,7 @@ pub fn render_recursive_inner(
     rt: &Runtime,
     cx: *mut JSContext,
     path: &std::path::Path,
+    parent_render_context: Option<Rc<RefCell<RenderContext>>>,
     child_dom: Rc<Option<html5ever::rcdom::RcDom>>,
     child: Option<&mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>>,
     set_vars: Option<serde_json::Value>,
@@ -1202,7 +1382,15 @@ pub fn render_recursive_inner(
                 contents = override_contents;
             }
             let mut result = render::render_markdown(&contents);
-            let partial = render_dom(&global, &rt, cx, &mut result, None, child_dom);
+            let (partial, child_render_context) = parse_and_render_dom(&global, &rt, cx, &mut result, None, parent_render_context, child_dom);
+
+            debug!("child render context info:");
+            {
+                use std::borrow::Borrow;
+                let item : &RefCell<RenderContext> = child_render_context.borrow();
+                let item2 = item.borrow();
+                debug!("has {} slots: {:?}", item2.slots.len(), item2.slots.keys().collect::<Vec<&String>>());
+            }
 
             let c_str = std::ffi::CString::new("layout").unwrap();
             let ptr = c_str.as_ptr() as *const i8;
@@ -1220,6 +1408,7 @@ pub fn render_recursive_inner(
                     &rt,
                     cx,
                     &std::path::Path::new(&stringify_jsvalue(cx, &layout_result)),
+                    Some(child_render_context),
                     Rc::new(Some(partial)),
                     Some(&global),
                     set_vars,
@@ -1230,7 +1419,7 @@ pub fn render_recursive_inner(
         } else if path_str.ends_with(".html") || path_str.ends_with(".htm") {
             // let output = render(&global, &rt, cx, &mut contents, None);
             debug!("-> render partial html.");
-            let partial = render_dom(&global, &rt, cx, &mut contents, None, child_dom);
+            let (partial, child_render_context) = parse_and_render_dom(&global, &rt, cx, &mut contents, None, parent_render_context, child_dom);
             debug!("-> render partial html complete.");
             let c_str = std::ffi::CString::new("layout").unwrap();
             let ptr = c_str.as_ptr() as *const i8;
@@ -1249,6 +1438,7 @@ pub fn render_recursive_inner(
                     &rt,
                     cx,
                     &std::path::Path::new(&stringify_jsvalue(cx, &layout_result)),
+                    Some(child_render_context),
                     Rc::new(Some(partial)),
                     Some(&global),
                     set_vars,

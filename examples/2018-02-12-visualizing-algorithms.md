@@ -12,6 +12,9 @@ description_in_listing: true
 notruncate: false
 ---
 
+<script slot="javascript" src="https://richinfante.com/script.js"></script>
+<link slot="stylesheet" rel="stylesheet" href="https://richinfante.com/styles.css"/>
+
 ## Introduction
 
 I recently  <a href="https://twitter.com/richinfante/status/959984976090619904">shared this on twitter</a>, and wanted to share a bit more about how I did it:
