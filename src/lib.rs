@@ -673,10 +673,15 @@ unsafe fn render_children(
                         attr.value = stringify_jsvalue(cx, &value).into();
 
                         // support for boolean flag type attribute names
-                        if final_name == "checked"
-                            || final_name == "selected"
-                            || final_name == "disabled"
-                            || final_name == "readonly"
+                        if final_name == "checked" // checkbox
+                            || final_name == "selected" // select box
+                            || final_name == "disabled" // input
+                            || final_name == "readonly" // input 
+                            || final_name == "autoplay" // video
+                            || final_name == "controls" // video
+                            || final_name == "loop" // video 
+                            || final_name == "muted" // video
+                            || final_name == "open" // summary
                         {
                             // only if it's a boolean, perform boolification of it for the conditional
                             if boolify_jsvalue(cx, &value) {
