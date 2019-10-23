@@ -666,11 +666,10 @@ unsafe fn render_children(
                     trace!("{:?}", attr);
                     let name = &attr.name.local.to_string();
                     let script = String::from(&attr.value);
-                    if name.starts_with(":") {
+                    if name.starts_with(":") && needs_expansion.is_none() {
                         let final_name = name[1..].to_string();
                         attr.name = QualName::new(None, "".into(), final_name.clone().into());
                         let value: JSVal = eval(&global, &rt, cx, &script).unwrap();
-                        attr.value = stringify_jsvalue(cx, &value).into();
 
                         // support for boolean flag type attribute names
                         if final_name == "checked" // checkbox
@@ -685,12 +684,14 @@ unsafe fn render_children(
                         {
                             // only if it's a boolean, perform boolification of it for the conditional
                             if boolify_jsvalue(cx, &value) {
+                                attr.value = String::new().into();
                                 final_attrs.push(attr.clone());
                             }
                         } else {
+                            attr.value = stringify_jsvalue(cx, &value).into();
                             final_attrs.push(attr.clone());
                         }
-                    } else if name == "x-if" {
+                    } else if name == "x-if" && needs_expansion.is_none() {
                         let included = eval_in_engine_bool(&global, &rt, cx, &script);
                         if !included {
                             return CondGenFlags {
@@ -926,16 +927,88 @@ unsafe fn render_children(
                         }
 
                         let mut expand_node = deep_clone(node, parent);
-                        render_children(
-                            global,
-                            rt,
-                            cx,
-                            &mut expand_node,
-                            false,
-                            render_context.clone(),
-                            slot_contents.clone(),
-                        );
-                        replacements.push(expand_node);
+                        let mut should_append = true;
+                        let mut final_expansion_attrs: Vec<html5ever::interface::Attribute> = vec![];
+                        {
+                            use std::borrow::BorrowMut;
+                            {
+                                let mut attributes: (RefCell<Vec<html5ever::interface::Attribute>>, RefMut<Vec<html5ever::interface::Attribute>>) =
+                                match &expand_node.borrow_mut().data {
+                                    NodeData::Element { attrs, .. } => {
+                                        (attrs.clone(), attrs.borrow_mut())
+                                    },
+                                    _ => panic!("non element rendered in for")
+                                };
+
+                                for attr in attributes.1.iter_mut() {
+                                    trace!("{:?}", attr);
+                                    let name = &attr.name.local.to_string();
+                                    let script = String::from(&attr.value);
+                                    if name.starts_with(":") {
+                                        let final_name = name[1..].to_string();
+                                        attr.name = QualName::new(None, "".into(), final_name.clone().into());
+                                        let value: JSVal = eval(&global, &rt, cx, &script).unwrap();
+
+                                        // support for boolean flag type attribute names
+                                        if final_name == "checked" // checkbox
+                                            || final_name == "selected" // select box
+                                            || final_name == "disabled" // input
+                                            || final_name == "readonly" // input 
+                                            || final_name == "autoplay" // video
+                                            || final_name == "controls" // video
+                                            || final_name == "loop" // video 
+                                            || final_name == "muted" // video
+                                            || final_name == "open" // summary
+                                        {
+                                            // only if it's a boolean, perform boolification of it for the conditional
+                                            if boolify_jsvalue(cx, &value) {
+                                                attr.value = String::new().into();
+                                                final_expansion_attrs.push(attr.clone());
+                                            } else {
+                                                attr.value = String::new().into();
+                                                attr.name.local = String::new().into();
+                                            }
+                                        } else {
+                                            attr.value = stringify_jsvalue(cx, &value).into();
+                                            final_expansion_attrs.push(attr.clone());
+                                        }
+                                    } else if name == "x-if" {
+                                        let included = eval_in_engine_bool(&global, &rt, cx, &script);
+                                        if !included {
+                                            should_append = false;
+                                        }
+                                    } else if name == "x-each" && loop_expansion {
+                                        // do nothing
+                                    } else if name == "x-for" && loop_expansion {
+                                        // do nothing
+                                    } else if node_name == "slot" && name == "src" {
+                                        panic!("cannot set slot inside iter");
+                                    } else if name == "x-as" || name == "x-index" {
+                                        // Do nothing.
+                                    } else {
+                                        final_expansion_attrs.push(attr.clone());
+                                    }
+                                }
+                            }
+                        }
+                        if should_append {
+                            // substitute rendered attributes into the node.
+                            if let NodeData::Element { attrs, .. } = &expand_node.data {
+                                // info!("{:#?}", attrs);
+                                attrs.replace(final_expansion_attrs);
+                                // info!("{:#?}", attrs);
+                            }
+                            render_children(
+                                global,
+                                rt,
+                                cx,
+                                &mut expand_node,
+                                false,
+                                render_context.clone(),
+                                slot_contents.clone(),
+                            );
+                            replacements.push(expand_node);
+                        }
 
                         // Increment iteration counter.
                         loop_index += 1;
