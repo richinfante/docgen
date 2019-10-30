@@ -1085,7 +1085,7 @@ unsafe fn render_children(
             //   value: "true".into()
             // });
 
-            if node_name != "script" {
+            if node_name != "script" && !needs_remove {
                 trace!("Rendering children...");
                 let mut out_children: Vec<Rc<Node>> = vec![];
 
