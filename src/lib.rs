@@ -178,6 +178,8 @@ unsafe fn stringify_jsvalue(cx: *mut JSContext, rval: &JSVal) -> String {
         }
     }
 
+    // TODO: json stringify here.
+
     return "(error: stringify_jsvalue unimplemented type!)".to_string();
 }
 
@@ -218,7 +220,7 @@ pub fn eval_in_engine(
     cx: *mut JSContext,
     filename: Option<&str>,
     contents: &str,
-) -> String {
+) -> Result<String, String> {
     rooted!(in(cx) let mut rval = UndefinedValue());
     let res = rt.evaluate_script(
         global.handle(),
@@ -229,12 +231,15 @@ pub fn eval_in_engine(
     );
 
     if !res.is_ok() {
-        print_exception(&rt, cx);
-        panic!("Error evaluating: {}, {:?}", contents, res);
+        // print_exception(&rt, cx);
+        let exception = fmt_exception(&rt, cx);
+        error!("Error: {}", exception);
+        error!("Error: evaluating: {}, {:?}", contents, res);
+        return Err(exception);
     }
 
     unsafe {
-        return stringify_jsvalue(cx, &rval);
+        return Ok(stringify_jsvalue(cx, &rval));
     }
 }
 
@@ -288,14 +293,24 @@ pub fn eval_in_engine_bool(
 
 /// Flags used for conditional node generation
 pub struct CondGenFlags {
+    conditional: ConditionalChainState,
     remove: bool,
     replace: Option<Vec<Rc<Node>>>,
 }
 
 impl CondGenFlags {
+    pub fn remove() -> CondGenFlags {
+        CondGenFlags {
+            conditional: ConditionalChainState::NotConditional,
+            remove: true,
+            replace: None,
+        }
+    }
+
     /// Set up the default flags
     pub fn default() -> CondGenFlags {
         CondGenFlags {
+            conditional: ConditionalChainState::NotConditional,
             remove: false,
             replace: None,
         }
@@ -427,6 +442,12 @@ fn deep_clone(old_node: &Rc<Node>, parent: Option<Weak<Node>>) -> Rc<Node> {
 
 use mozjs::conversions::ToJSValConvertible;
 
+enum ConditionalChainState {
+    StartedNotFound,
+    CondinuedNotFound,
+    NoContinueChain,
+    NotConditional
+}
 pub fn parse_for_notation(notation: &str) -> (String, String, String) {
     let simple_in_of = Regex::new(r###"^([a-zA-Z$_]+) (in|of) (.*)$"###).unwrap();
 
@@ -504,6 +525,8 @@ unsafe fn render_children(
     loop_expansion: bool,
     render_context: Rc<RefCell<RenderContext>>,
     slot_contents: Rc<Option<html5ever::rcdom::RcDom>>,
+    conditional_chain_continue: bool,
+    last_was_removed: bool
 ) -> CondGenFlags {
     let flags = CondGenFlags::default();
 
@@ -520,6 +543,8 @@ unsafe fn render_children(
                     true,
                     render_context.clone(),
                     slot_contents.clone(),
+                    true,
+                    false
                 );
             }
 
@@ -561,6 +586,7 @@ unsafe fn render_children(
                     }
 
                     return CondGenFlags {
+                        conditional: ConditionalChainState::NotConditional,
                         remove: true,
                         replace: None,
                     };
@@ -593,6 +619,7 @@ unsafe fn render_children(
                 }
 
                 return CondGenFlags {
+                    conditional: ConditionalChainState::NotConditional,
                     remove: true,
                     replace: None,
                 };
@@ -607,6 +634,7 @@ unsafe fn render_children(
                         trace!("got {} childen to doc", children.len());
                         if children.len() == 0 {
                             return CondGenFlags {
+                                conditional: ConditionalChainState::NotConditional,
                                 remove: true,
                                 replace: None,
                             };
@@ -616,6 +644,7 @@ unsafe fn render_children(
                         trace!("got {} childen to html", html_children.len());
                         if html_children.len() == 0 {
                             return CondGenFlags {
+                                conditional: ConditionalChainState::NotConditional,
                                 remove: true,
                                 replace: None,
                             };
@@ -624,6 +653,7 @@ unsafe fn render_children(
                         let children = body.children.borrow();
                         // let items : &Vec<std::rc::Rc<html5ever::rcdom::Node>> = children.as_ref();
                         return CondGenFlags {
+                            conditional: ConditionalChainState::NotConditional,
                             remove: true,
                             replace: Some(
                                 children
@@ -642,6 +672,7 @@ unsafe fn render_children(
                         debug!("-> found slot contents: {}", &slot_name);
                         // let items : &Vec<std::rc::Rc<html5ever::rcdom::Node>> = children.as_ref();
                         return CondGenFlags {
+                            conditional: ConditionalChainState::NotConditional,
                             remove: true,
                             replace: Some(
                                 found_slot_contents
@@ -652,6 +683,7 @@ unsafe fn render_children(
                         };
                     } else {
                         return CondGenFlags {
+                            conditional: ConditionalChainState::NotConditional,
                             remove: true,
                             replace: None,
                         };
@@ -695,9 +727,38 @@ unsafe fn render_children(
                         let included = eval_in_engine_bool(&global, &rt, cx, &script);
                         if !included {
                             return CondGenFlags {
+                                conditional: ConditionalChainState::StartedNotFound,
                                 remove: true,
                                 replace: None,
                             };
+                        }
+                    } else if name == "x-else-if" && needs_expansion.is_none() {
+                        if conditional_chain_continue {
+                            let included = eval_in_engine_bool(&global, &rt, cx, &script);
+                            if !included {
+                                trace!("not rendering else-if: falsey flags!");
+                                return CondGenFlags {
+                                    conditional: ConditionalChainState::CondinuedNotFound,
+                                    remove: true,
+                                    replace: None,
+                                };
+                            }
+                        } else {
+                            trace!("not rendering else-if: no continue!");
+                            return CondGenFlags {
+                                conditional: ConditionalChainState::NoContinueChain,
+                                remove: true,
+                                replace: None
+                            }
+                        }
+                    } else if name == "x-else" && needs_expansion.is_none() {
+                        if !conditional_chain_continue {
+                            trace!("not rendering else: no continue!");
+                            return CondGenFlags {
+                                conditional: ConditionalChainState::NoContinueChain,
+                                remove: true,
+                                replace: None
+                            }
                         }
                     } else if name == "x-each" && loop_expansion {
                         needs_expansion = Some(script);
@@ -705,7 +766,7 @@ unsafe fn render_children(
                         let (new_loop_name, _, expression) = parse_for_notation(&script);
                         loop_name = new_loop_name;
                         needs_expansion = Some(expression);
-                    } else if (node_name == "slot" && name == "src") {
+                    } else if node_name == "slot" && name == "src" {
                         rooted!(in(cx) let child_global =
                         JS_NewGlobalObject(cx, &SIMPLE_GLOBAL_CLASS, ptr::null_mut(),
                                                     OnNewGlobalHookOption::FireOnNewGlobalHook,
@@ -774,6 +835,7 @@ unsafe fn render_children(
                         let children = body.children.borrow();
                         // let items : &Vec<std::rc::Rc<html5ever::rcdom::Node>> = children.as_ref();
                         return CondGenFlags {
+                            conditional: ConditionalChainState::NotConditional,
                             remove: true,
                             replace: Some(
                                 children
@@ -1006,6 +1068,8 @@ unsafe fn render_children(
                                 false,
                                 render_context.clone(),
                                 slot_contents.clone(),
+                                false,
+                                false
                             );
                             replacements.push(expand_node);
                         }
@@ -1028,6 +1092,9 @@ unsafe fn render_children(
                 {
                     let mut children = node.children.borrow_mut();
                     trace!("have {} children.", children.len());
+                    let mut iter_continue = false;
+                    let mut last_was_removed = false;
+
                     for item in children.iter_mut() {
                         trace!("Rendering child...");
                         let flags = render_children(
@@ -1038,12 +1105,35 @@ unsafe fn render_children(
                             true,
                             render_context.clone(),
                             slot_contents.clone(),
+                            iter_continue,
+                            last_was_removed
                         );
 
+                        // use the conditional flags to decide if we need to keep checking conditionals
+                        match flags.conditional {
+                            ConditionalChainState::NotConditional |
+                            ConditionalChainState::NoContinueChain => {
+                                iter_continue = false;
+                            },
+                            ConditionalChainState::CondinuedNotFound |
+                            ConditionalChainState::StartedNotFound => {
+                                iter_continue = true;
+                            }
+                        }
+
+                        // flag for if last was removed (used to trim unneeded whitespace text nodes surrounding removed elements)
+                        if flags.remove && flags.replace.is_none() {
+                            last_was_removed = true
+                        } else {
+                            last_was_removed = false;
+                        }
+                        
+                        // If not removed, add it to output
                         if !flags.remove {
                             out_children.push(item.clone())
                         }
 
+                        // If there's replacements, add them.
                         if let Some(replacements) = flags.replace {
                             for item in replacements {
                                 out_children.push(item);
@@ -1062,6 +1152,7 @@ unsafe fn render_children(
             }
 
             CondGenFlags {
+                conditional: ConditionalChainState::NoContinueChain,
                 replace: Some(replacements),
                 remove: needs_remove,
             }
@@ -1071,13 +1162,30 @@ unsafe fn render_children(
             // let contents : String = tendril.into();
             let x = format!("{}", tendril);
 
+            // TODO: important! maintain conditional state, ignoring whitespace.
+
+            // If the last element was removed, and this is *all* whitespace, remove it from the tree.
+            if last_was_removed && x.trim() == "" {
+                if conditional_chain_continue {
+                    return CondGenFlags {
+                        conditional: ConditionalChainState::CondinuedNotFound,
+                        remove: true,
+                        replace: None
+                    }
+                }
+                return CondGenFlags::remove();
+            }
+
             let regex = Regex::new(r###"\{\{(.*?)\}\}"###).unwrap();
 
             let result = regex.replace_all(&x, |caps: &Captures| {
                 if let Some(code) = caps.get(0) {
                     let string: &str = code.into();
                     trace!("render var: {}", string);
-                    return eval_in_engine(&global, rt, cx, Some("variable_substitution"), string);
+                    return match eval_in_engine(&global, rt, cx, Some("variable_substitution"), string) {
+                        Ok(string) => string, 
+                        Err(string) => format!("error: {}", string) // TODO: check for debug / prod mode.
+                    };
                 }
 
                 return "".to_string();
@@ -1085,6 +1193,14 @@ unsafe fn render_children(
 
             tendril.clear();
             tendril.try_push_bytes(result.as_bytes()).unwrap();
+
+            if conditional_chain_continue {
+                return CondGenFlags {
+                    conditional: ConditionalChainState::CondinuedNotFound,
+                    remove: true,
+                    replace: None
+                }
+            }
             return CondGenFlags::default();
         }
         NodeData::Comment { contents } => {
@@ -1103,6 +1219,7 @@ unsafe fn render_children(
                         trace!("slot: got {} childen to doc", children.len());
                         if children.len() == 0 {
                             return CondGenFlags {
+                                conditional: ConditionalChainState::NotConditional,
                                 remove: true,
                                 replace: None,
                             };
@@ -1112,6 +1229,7 @@ unsafe fn render_children(
                         trace!("slot: got {} childen to html", html_children.len());
                         if html_children.len() == 0 {
                             return CondGenFlags {
+                                conditional: ConditionalChainState::NotConditional,
                                 remove: true,
                                 replace: None,
                             };
@@ -1120,6 +1238,7 @@ unsafe fn render_children(
                         let children = body.children.borrow();
                         // let items : &Vec<std::rc::Rc<html5ever::rcdom::Node>> = children.as_ref();
                         return CondGenFlags {
+                            conditional: ConditionalChainState::NotConditional,
                             remove: true,
                             replace: Some(
                                 children
@@ -1137,6 +1256,7 @@ unsafe fn render_children(
                         debug!("slot: found slot contents: {}", &slot_name);
                         // let items : &Vec<std::rc::Rc<html5ever::rcdom::Node>> = children.as_ref();
                         return CondGenFlags {
+                            conditional: ConditionalChainState::NotConditional,
                             remove: true,
                             replace: Some(
                                 found_slot_contents
@@ -1147,6 +1267,7 @@ unsafe fn render_children(
                         };
                     } else {
                         return CondGenFlags {
+                            conditional: ConditionalChainState::NotConditional,
                             remove: true,
                             replace: None,
                         };
@@ -1253,6 +1374,8 @@ pub fn render_dom(
                     true,
                     render_context.clone(),
                     slot_contents.clone(),
+                    false,
+                    false,
                 );
             }
         }
@@ -1319,7 +1442,7 @@ pub fn render_recursive(
     set_vars: Option<serde_json::Value>,
 ) -> String {
     let (rt, cx) = init_js();
-    render_recursive_inner(&rt, cx, path, None, child_dom, child, set_vars)
+    render_recursive_path(&rt, cx, path, None, child_dom, child, set_vars)
 }
 
 pub fn print_exception(rt: &Runtime, cx: *mut JSContext) {
@@ -1341,9 +1464,31 @@ pub fn print_exception(rt: &Runtime, cx: *mut JSContext) {
         }
     }
 }
-/// Perform a recursive render.
-/// Attach parent global into jsengine if it exists
-pub fn render_recursive_inner(
+
+pub fn fmt_exception(rt: &Runtime, cx: *mut JSContext) -> String {
+    unsafe {
+        rooted!(in(cx) let mut exc = UndefinedValue());
+        mozjs::rust::jsapi_wrapped::JS_GetPendingException(cx, &mut exc.handle_mut());
+        if exc.is_object() {
+            rooted!(in(cx) let exc_object = exc.to_object());
+            let c_str = std::ffi::CString::new("message").unwrap();
+            let ptr = c_str.as_ptr() as *const i8;
+            rooted!(in(cx) let mut message_res = UndefinedValue());
+            mozjs::rust::wrappers::JS_GetProperty(
+                cx,
+                exc_object.handle(),
+                ptr,
+                message_res.handle_mut(),
+            );
+            format!("Error: {}", stringify_jsvalue(cx, &message_res))
+        } else {
+            rooted!(in(cx) let mut stringified = UndefinedValue());
+            stringify_jsvalue(cx, &exc.handle())
+        }
+    }
+}
+
+pub fn render_recursive_path(
     rt: &Runtime,
     cx: *mut JSContext,
     path: &std::path::Path,
@@ -1354,7 +1499,40 @@ pub fn render_recursive_inner(
 ) -> String {
     let path_str = format!("{}", path.display());
     debug!("rendering path: {}", path.display());
-    let mut contents = std::fs::read_to_string(&path).unwrap();
+    let mut template = std::fs::read_to_string(&path).unwrap();
+    let mut template_type = RenderType::Unknown;
+
+    if path_str.ends_with(".html") || path_str.ends_with(".htm") {
+        template_type = RenderType::Html;
+    }
+
+    if path_str.ends_with(".md") || path_str.ends_with(".markdown") {
+        template_type = RenderType::Markdown;
+    }
+
+    render_recursive_string(rt, cx, &mut template, template_type, parent_render_context, child_dom, child, set_vars)
+}
+
+#[derive(Debug, PartialEq)]
+pub enum RenderType {
+    Html,
+    Markdown,
+    Unknown
+}
+
+/// Perform a recursive render.
+/// Attach parent global into jsengine if it exists
+pub fn render_recursive_string(
+    rt: &Runtime,
+    cx: *mut JSContext,
+    template: &mut String,
+    template_type: RenderType,
+    parent_render_context: Option<Rc<RefCell<RenderContext>>>,
+    child_dom: Rc<Option<html5ever::rcdom::RcDom>>,
+    child: Option<&mozjs::rust::RootedGuard<'_, *mut mozjs::jsapi::JSObject>>,
+    set_vars: Option<serde_json::Value>,
+) -> String {
+    let mut template = template;
 
     unsafe {
         rooted!(in(cx) let global =
@@ -1470,11 +1648,11 @@ pub fn render_recursive_inner(
         }
 
         let mut override_contents: Option<String> = None;
-        if path_str.ends_with(".md") {
-            match frontmatter::infer_type(&contents) {
+        if template_type == RenderType::Markdown {
+            match frontmatter::infer_type(&template) {
                 frontmatter::MatterType::YAML => {
                     if let (Some(matter), read_contents) =
-                        frontmatter::extract_frontmatter(&contents)
+                        frontmatter::extract_frontmatter(&template)
                     {
                         override_contents = Some(read_contents.to_string());
                         let val: serde_yaml::Value = serde_yaml::from_str(matter).unwrap();
@@ -1504,10 +1682,13 @@ pub fn render_recursive_inner(
                 }
                 _ => {}
             }
-            if let Some(override_contents) = override_contents {
-                contents = override_contents;
-            }
-            let mut result = render::render_markdown(&contents);
+
+
+            let mut result = match override_contents {
+                Some(override_contents) => render::render_markdown(&override_contents),
+                None => render::render_markdown(template)
+            };
+
             let (partial, child_render_context) = parse_and_render_dom(
                 &global,
                 &rt,
@@ -1542,7 +1723,7 @@ pub fn render_recursive_inner(
             debug!("layout -> {}", stringify_jsvalue(cx, &layout_result));
 
             if layout_result.is_string() {
-                return render_recursive_inner(
+                return render_recursive_path(
                     &rt,
                     cx,
                     &std::path::Path::new(&stringify_jsvalue(cx, &layout_result)),
@@ -1554,14 +1735,14 @@ pub fn render_recursive_inner(
             } else {
                 return serialize_dom(&partial);
             }
-        } else if path_str.ends_with(".html") || path_str.ends_with(".htm") {
+        } else if template_type == RenderType::Html {
             // let output = render(&global, &rt, cx, &mut contents, None);
             debug!("-> render partial html.");
             let (partial, child_render_context) = parse_and_render_dom(
                 &global,
                 &rt,
                 cx,
-                &mut contents,
+                &mut template,
                 None,
                 parent_render_context,
                 child_dom,
@@ -1580,7 +1761,7 @@ pub fn render_recursive_inner(
 
             if layout_result.is_string() {
                 debug!("-> render recursive!");
-                return render_recursive_inner(
+                return render_recursive_path(
                     &rt,
                     cx,
                     &std::path::Path::new(&stringify_jsvalue(cx, &layout_result)),
@@ -1620,4 +1801,44 @@ fn test_each_object_values_notation() {
     assert_eq!(name, "item");
     assert_eq!(kind, "of");
     assert_eq!(expr, "Object.entries({ a: 1 })");
+}
+
+#[test]
+fn test_render_html() {
+
+    let mut torender = r###"<!doctype html>
+<html>
+    <head></head>
+    <body>
+        <script static>
+        let cond1 = true;
+        let cond2 = false;
+        let iter = [1,2,3,4];
+        </script>
+        <input type="checkbox" name="one" :checked="cond1">
+        <input type="checkbox" name="two" :checked="cond2">
+        <div>{{iter.join(',')}}</div>
+        <div x-if="cond1">Foo</div>
+        <div x-else>Bar</div>
+        <div x-if="cond2">Baz</div>
+        <div x-else>Bat</div>
+        <div x-for="item in iter">{{item}}</div>
+    </body>
+</html"###.to_string();
+
+// TODO: make this output less icky
+let wanted = r###"<!DOCTYPE html><html><head></head>
+    <body>
+        <input type="checkbox" name="one" checked="">
+        <input type="checkbox" name="two">
+        <div>1,2,3,4</div>
+        <div>Foo</div>
+        <div>Bat</div>
+        <div>1</div><div>2</div><div>3</div><div>4</div>
+    
+</body></html>"###;
+
+    let (rt, cx) = init_js();
+    let rendered = render_recursive_string(&rt, cx, &mut torender, RenderType::Html, None, std::rc::Rc::new(None), None, None);
+    assert_eq!(rendered, wanted);
 }
