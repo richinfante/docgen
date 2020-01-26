@@ -47,6 +47,9 @@ pub mod render;
 
 use frontmatter::EasyToJSVal;
 
+pub mod backend;
+
+
 unsafe extern "C" fn console_log(
     context: *mut JSContext,
     argc: u32,
@@ -774,7 +777,7 @@ unsafe fn render_children(
                         );
 
                         let _ac = mozjs::jsapi::JSAutoCompartment::new(cx, child_global.get());
-                        assert!(mozjs::rust::wrappers::JS_InitStandardClasses(
+                        assert!(mozjs::rust::jsapi_wrapped::JS_InitStandardClasses(
                             cx,
                             global.handle()
                         ));
@@ -782,7 +785,7 @@ unsafe fn render_children(
                         let page_name = std::ffi::CString::new("page").unwrap();
                         let page_ptr = page_name.as_ptr() as *const i8;
                         rooted!(in(cx) let val = mozjs::jsval::ObjectValue(child_global.get()));
-                        mozjs::rust::wrappers::JS_SetProperty(
+                        mozjs::rust::jsapi_wrapped::JS_SetProperty(
                             cx,
                             child_global.handle(),
                             page_ptr,
@@ -792,7 +795,7 @@ unsafe fn render_children(
                         let result_name = std::ffi::CString::new("parent").unwrap();
                         let result_name_ptr = result_name.as_ptr() as *const i8;
                         rooted!(in(cx) let val = mozjs::jsval::ObjectValue(global.get()));
-                        mozjs::rust::wrappers::JS_SetProperty(
+                        mozjs::rust::jsapi_wrapped::JS_SetProperty(
                             cx,
                             child_global.handle(),
                             result_name_ptr,
@@ -871,25 +874,25 @@ unsafe fn render_children(
                     // 2. object[Symbol.iterator]
                     rooted!(in(cx) let mut fnhandle = UndefinedValue());
                     rooted!(in(cx) let obj = object.to_object());
-                    if !mozjs::rust::wrappers::JS_GetPropertyById(
+                    if !mozjs::rust::jsapi_wrapped::JS_GetPropertyById(
                         cx,
                         obj.handle(),
                         mozjs::rust::Handle::new(&id),
-                        fnhandle.handle_mut(),
+                        &mut fnhandle.handle_mut(),
                     ) {
                         panic!("Couldnt get iterator")
                     }
 
                     // 3. Call function to get an iterator.
                     rooted!(in(cx) let mut iterret = UndefinedValue());
-                    rooted!(in(cx) let func = mozjs::rust::wrappers::JS_ValueToFunction(cx, fnhandle.handle()));
+                    rooted!(in(cx) let func = mozjs::rust::jsapi_wrapped::JS_ValueToFunction(cx, fnhandle.handle()));
                     let args = mozjs::jsapi::HandleValueArray::new();
-                    mozjs::rust::wrappers::JS_CallFunction(
+                    mozjs::rust::jsapi_wrapped::JS_CallFunction(
                         cx,
                         obj.handle(),
                         func.handle(),
                         &args,
-                        iterret.handle_mut(),
+                        &mut iterret.handle_mut(),
                     );
 
                     let mut loop_index: u64 = 0;
@@ -904,12 +907,12 @@ unsafe fn render_children(
                         let next_ptr = next_str.as_ptr() as *const i8;
                         let args = mozjs::jsapi::HandleValueArray::new();
                         rooted!(in(cx) let mut iteration_value = UndefinedValue());
-                        mozjs::rust::wrappers::JS_CallFunctionName(
+                        mozjs::rust::jsapi_wrapped::JS_CallFunctionName(
                             cx,
                             iter_result.handle(),
                             next_ptr,
                             &args,
-                            iteration_value.handle_mut(),
+                            &mut iteration_value.handle_mut(),
                         );
 
                         if !iteration_value.is_object() {
@@ -924,11 +927,11 @@ unsafe fn render_children(
                             let c_str = std::ffi::CString::new("value").unwrap();
                             let ptr = c_str.as_ptr() as *const i8;
                             rooted!(in(cx) let iteration_value_obj = iteration_value.to_object());
-                            mozjs::rust::wrappers::JS_GetProperty(
+                            mozjs::rust::jsapi_wrapped::JS_GetProperty(
                                 cx,
                                 iteration_value_obj.handle(),
                                 ptr,
-                                iteration_result_value.handle_mut(),
+                                &mut iteration_result_value.handle_mut(),
                             );
                         }
 
@@ -939,11 +942,11 @@ unsafe fn render_children(
                         let done_str_ptr = done_str.as_ptr() as *const i8;
                         rooted!(in(cx) let iteration_value_obj = iteration_value.to_object());
                         rooted!(in(cx) let mut iteration_done_value = UndefinedValue());
-                        mozjs::rust::wrappers::JS_GetProperty(
+                        mozjs::rust::jsapi_wrapped::JS_GetProperty(
                             cx,
                             iteration_value_obj.handle(),
                             done_str_ptr,
-                            iteration_done_value.handle_mut(),
+                            &mut iteration_done_value.handle_mut(),
                         );
                         trace!(
                             "iter done -> {}",
@@ -961,7 +964,7 @@ unsafe fn render_children(
                         let result_name = std::ffi::CString::new(loop_name.clone()).unwrap();
                         let result_name_ptr = result_name.as_ptr() as *const i8;
                         rooted!(in(cx) let iter_val = iteration_result_value.clone());
-                        mozjs::rust::wrappers::JS_SetProperty(
+                        mozjs::rust::jsapi_wrapped::JS_SetProperty(
                             cx,
                             global.handle(),
                             result_name_ptr,
@@ -972,7 +975,7 @@ unsafe fn render_children(
                         let index_name_ptr = index_name_str.as_ptr() as *const i8;
                         rooted!(in(cx) let mut index = UndefinedValue());
                         loop_index.to_jsval(cx, index.handle_mut());
-                        mozjs::rust::wrappers::JS_SetProperty(
+                        mozjs::rust::jsapi_wrapped::JS_SetProperty(
                             cx,
                             global.handle(),
                             index_name_ptr,
@@ -1454,11 +1457,11 @@ pub fn print_exception(rt: &Runtime, cx: *mut JSContext) {
             let c_str = std::ffi::CString::new("message").unwrap();
             let ptr = c_str.as_ptr() as *const i8;
             rooted!(in(cx) let mut message_res = UndefinedValue());
-            mozjs::rust::wrappers::JS_GetProperty(
+            mozjs::rust::jsapi_wrapped::JS_GetProperty(
                 cx,
                 exc_object.handle(),
                 ptr,
-                message_res.handle_mut(),
+                &mut message_res.handle_mut(),
             );
             error!("Error: {}", stringify_jsvalue(cx, &message_res));
         }
@@ -1474,11 +1477,11 @@ pub fn fmt_exception(rt: &Runtime, cx: *mut JSContext) -> String {
             let c_str = std::ffi::CString::new("message").unwrap();
             let ptr = c_str.as_ptr() as *const i8;
             rooted!(in(cx) let mut message_res = UndefinedValue());
-            mozjs::rust::wrappers::JS_GetProperty(
+            mozjs::rust::jsapi_wrapped::JS_GetProperty(
                 cx,
                 exc_object.handle(),
                 ptr,
-                message_res.handle_mut(),
+                &mut message_res.handle_mut(),
             );
             format!("Error: {}", stringify_jsvalue(cx, &message_res))
         } else {
@@ -1542,12 +1545,12 @@ pub fn render_recursive_string(
         );
 
         let _ac = mozjs::jsapi::JSAutoCompartment::new(cx, global.get());
-        assert!(mozjs::rust::wrappers::JS_InitStandardClasses(
+        assert!(mozjs::rust::jsapi_wrapped::JS_InitStandardClasses(
             cx,
             global.handle()
         ));
 
-        let function = mozjs::rust::wrappers::JS_DefineFunction(
+        let function = mozjs::rust::jsapi_wrapped::JS_DefineFunction(
             cx,
             global.handle(),
             b"console_log\0".as_ptr() as *const libc::c_char,
@@ -1557,7 +1560,7 @@ pub fn render_recursive_string(
         );
         assert!(!function.is_null());
 
-        let function2 = mozjs::rust::wrappers::JS_DefineFunction(
+        let function2 = mozjs::rust::jsapi_wrapped::JS_DefineFunction(
             cx,
             global.handle(),
             b"console_error\0".as_ptr() as *const libc::c_char,
@@ -1567,7 +1570,7 @@ pub fn render_recursive_string(
         );
         assert!(!function2.is_null());
 
-        let function3 = mozjs::rust::wrappers::JS_DefineFunction(
+        let function3 = mozjs::rust::jsapi_wrapped::JS_DefineFunction(
             cx,
             global.handle(),
             b"console_debug\0".as_ptr() as *const libc::c_char,
@@ -1577,7 +1580,7 @@ pub fn render_recursive_string(
         );
         assert!(!function3.is_null());
 
-        let function3 = mozjs::rust::wrappers::JS_DefineFunction(
+        let function3 = mozjs::rust::jsapi_wrapped::JS_DefineFunction(
             cx,
             global.handle(),
             b"console_warn\0".as_ptr() as *const libc::c_char,
@@ -1587,7 +1590,7 @@ pub fn render_recursive_string(
         );
         assert!(!function3.is_null());
 
-        let function4 = mozjs::rust::wrappers::JS_DefineFunction(
+        let function4 = mozjs::rust::jsapi_wrapped::JS_DefineFunction(
             cx,
             global.handle(),
             b"fs_readFileSync\0".as_ptr() as *const libc::c_char,
@@ -1616,13 +1619,13 @@ pub fn render_recursive_string(
         let result_name = std::ffi::CString::new("page").unwrap();
         let result_name_ptr = result_name.as_ptr() as *const i8;
         rooted!(in(cx) let val = mozjs::jsval::ObjectValue(global.get()));
-        mozjs::rust::wrappers::JS_SetProperty(cx, global.handle(), result_name_ptr, val.handle());
+        mozjs::rust::jsapi_wrapped::JS_SetProperty(cx, global.handle(), result_name_ptr, val.handle());
 
         if let Some(child) = child {
             let result_name = std::ffi::CString::new("child").unwrap();
             let result_name_ptr = result_name.as_ptr() as *const i8;
             rooted!(in(cx) let val = mozjs::jsval::ObjectValue(child.get()));
-            mozjs::rust::wrappers::JS_SetProperty(
+            mozjs::rust::jsapi_wrapped::JS_SetProperty(
                 cx,
                 global.handle(),
                 result_name_ptr,
@@ -1637,7 +1640,7 @@ pub fn render_recursive_string(
                     rooted!(in(cx) let val = value.convert_to_jsval(cx));
                     let fmname = std::ffi::CString::new(key.as_str()).unwrap();
                     let fmname_ptr = fmname.as_ptr() as *const i8;
-                    mozjs::rust::wrappers::JS_SetProperty(
+                    mozjs::rust::jsapi_wrapped::JS_SetProperty(
                         cx,
                         global.handle(),
                         fmname_ptr,
@@ -1664,7 +1667,7 @@ pub fn render_recursive_string(
                                     rooted!(in(cx) let val = value_to_set.convert_to_jsval(cx));
                                     let fmname = std::ffi::CString::new(string.as_str()).unwrap();
                                     let fmname_ptr = fmname.as_ptr() as *const i8;
-                                    mozjs::rust::wrappers::JS_SetProperty(
+                                    mozjs::rust::jsapi_wrapped::JS_SetProperty(
                                         cx,
                                         global.handle(),
                                         fmname_ptr,
@@ -1714,11 +1717,11 @@ pub fn render_recursive_string(
             let c_str = std::ffi::CString::new("layout").unwrap();
             let ptr = c_str.as_ptr() as *const i8;
             rooted!(in(cx) let mut layout_result = UndefinedValue());
-            mozjs::rust::wrappers::JS_GetProperty(
+            mozjs::rust::jsapi_wrapped::JS_GetProperty(
                 cx,
                 global.handle(),
                 ptr,
-                layout_result.handle_mut(),
+                &mut layout_result.handle_mut(),
             );
             debug!("layout -> {}", stringify_jsvalue(cx, &layout_result));
 
@@ -1751,11 +1754,11 @@ pub fn render_recursive_string(
             let c_str = std::ffi::CString::new("layout").unwrap();
             let ptr = c_str.as_ptr() as *const i8;
             rooted!(in(cx) let mut layout_result = UndefinedValue());
-            mozjs::rust::wrappers::JS_GetProperty(
+            mozjs::rust::jsapi_wrapped::JS_GetProperty(
                 cx,
                 global.handle(),
                 ptr,
-                layout_result.handle_mut(),
+                &mut layout_result.handle_mut(),
             );
             debug!("-> layout -> {}", stringify_jsvalue(cx, &layout_result));
 
